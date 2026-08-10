@@ -2,6 +2,7 @@
 // the server verifies `hello.token` against FLEETVIEW_TOKEN. A wrong/absent
 // token closes the socket with a specific app-range code + reason and the
 // connection is never registered.
+import { timingSafeEqual } from "node:crypto";
 import type { WebSocket } from "ws";
 import { parseMessage, type WireMessage } from "../protocol.js";
 
@@ -9,12 +10,35 @@ import { parseMessage, type WireMessage } from "../protocol.js";
 export const AUTH_FAIL_CODE = 4001;
 export const AUTH_FAIL_REASON = "auth failed";
 
+/** Constant-time string equality; false on length mismatch (never throws). */
+function safeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
+
+/**
+ * Fail-closed config check: the server must not run without a real token.
+ * An unset or empty FLEETVIEW_TOKEN would otherwise let empty-token clients in.
+ */
+export function requireToken(value: string | undefined): string {
+  if (!value) {
+    throw new Error("FLEETVIEW_TOKEN must be set to a non-empty value (fail-closed).");
+  }
+  return value;
+}
+
 /** True iff `msg` is a well-formed hello whose token matches `expected`. */
 export function verifyHello(msg: WireMessage, expected: string): boolean {
+  // Fail closed: with no configured token, reject everything.
+  if (!expected) return false;
   if (msg.t !== "hello") return false;
-  if (msg.role === "node") return msg.token === expected;
-  // Browser hellos are same-origin; a token, if present, must still match.
-  if (msg.role === "browser") return msg.token === undefined || msg.token === expected;
+  if (msg.role === "node") return safeEqual(msg.token, expected);
+  // Browser hellos are same-origin (D3/A4): a token is optional, but if
+  // present it must still match. Browsing the dashboard requires reaching the
+  // same-origin server; the token is the node-push credential.
+  if (msg.role === "browser") return msg.token === undefined || safeEqual(msg.token, expected);
   return false;
 }
 

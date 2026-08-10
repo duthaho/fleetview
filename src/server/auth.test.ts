@@ -76,3 +76,25 @@ describe("attachAuth over a real ws pair", () => {
     expect(registered).toEqual([]);
   });
 });
+
+describe("auth hardening (security review)", () => {
+  it("uses constant-time comparison but still matches/ rejects correctly", () => {
+    // functional guarantee unchanged by timing-safe compare
+    expect(verifyHello({ t: "hello", role: "node", machineId: "m", token: "secret" }, "secret")).toBe(true);
+    expect(verifyHello({ t: "hello", role: "node", machineId: "m", token: "secreu" }, "secret")).toBe(false);
+    // different lengths must not throw (timingSafeEqual requires equal length)
+    expect(verifyHello({ t: "hello", role: "node", machineId: "m", token: "s" }, "secret")).toBe(false);
+  });
+
+  it("fail-closed: an empty expected token rejects everything, including empty-token nodes", () => {
+    expect(verifyHello({ t: "hello", role: "node", machineId: "m", token: "" }, "")).toBe(false);
+    expect(verifyHello({ t: "hello", role: "browser" }, "")).toBe(false);
+  });
+
+  it("requireToken throws when FLEETVIEW_TOKEN is unset/empty (fail-closed config)", async () => {
+    const { requireToken } = await import("./auth.js");
+    expect(() => requireToken(undefined)).toThrow(/FLEETVIEW_TOKEN/);
+    expect(() => requireToken("")).toThrow(/FLEETVIEW_TOKEN/);
+    expect(requireToken("secret")).toBe("secret");
+  });
+});
