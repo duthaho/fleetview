@@ -5,6 +5,7 @@
 import { WebSocket } from "ws";
 import { FleetNode, type NodeConn } from "./node.js";
 import { SimulatedSource } from "./sources/simulated.js";
+import { RealSource } from "./sources/real.js";
 import type { SessionSource } from "./source.js";
 
 interface Args {
@@ -33,11 +34,7 @@ export function parseArgs(argv: string[]): Args {
 }
 
 function makeSource(args: Args): SessionSource {
-  if (args.sourceKind === "real") {
-    // T12 provides the real reader; until then fall back to simulated so the
-    // process never crashes on `--source real`.
-    return new SimulatedSource(args.machineId, `${args.machineId}-sim`);
-  }
+  if (args.sourceKind === "real") return new RealSource(args.machineId);
   return new SimulatedSource(args.machineId, `${args.machineId}-sim`);
 }
 
