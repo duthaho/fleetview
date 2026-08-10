@@ -160,9 +160,20 @@ body {
 .btn.approve:hover { background: var(--accent); color: var(--paper); }
 .btn.deny { border-color: var(--danger); color: var(--danger); }
 .btn.deny:hover { background: var(--danger); color: var(--paper); }
+.session-detail .detail-head {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding-bottom: 8px; margin-bottom: 8px; border-bottom: 1px solid var(--rule);
+}
+.detail-id { color: var(--accent); font-weight: 600; }
+.detail-meta { color: var(--ink-2); font-size: 11px; }
+.detail-status { margin-left: auto; color: var(--ink-2); font-size: 11px; }
+.status-label-done { color: var(--accent); }
+.status-label-aborted { color: var(--danger); }
+.status-label-awaiting-approval { color: var(--warn); }
 .detail-diff { border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
-.diff-row { display: grid; grid-template-columns: 100%; padding: 0 10px; white-space: pre-wrap; word-break: break-all; }
-.diff-hunk { color: var(--ink-2); background: var(--paper-2); }
+.diff-row { padding: 0 10px; white-space: pre-wrap; word-break: break-all; }
+.diff-hunk { color: var(--ink); background: var(--paper-2); }
+.diff-meta { color: var(--ink-2); background: var(--paper-2); }
 .diff-add { color: var(--accent); }
 .diff-del { color: var(--danger); }
 .diff-context { color: var(--ink-2); }`;

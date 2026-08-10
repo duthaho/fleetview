@@ -4,6 +4,7 @@
 // loadable ESM; vitest tests only the pure render.ts functions, never this file.
 import type { MachineView, PendingPrompt, ServerToBrowser } from "../protocol.js";
 import { renderFleet, renderInbox } from "./render.js";
+import { renderSessionDetail } from "./diff.js";
 
 export const CLIENT_VERSION = "0.1.0";
 
@@ -18,12 +19,6 @@ const view: View = { machines: [], prompts: [], artifacts: new Map(), selected: 
 
 function q(sel: string): HTMLElement | null {
   return document.querySelector(sel);
-}
-
-// Session-detail rendering is provided by diff.ts (wired in T11). Until then a
-// minimal placeholder keeps the read-path client honest.
-function renderDetail(session: { id: string; status: string }, _diff: string | null): string {
-  return `<p class="empty">${session.id} — ${session.status}</p>`;
 }
 
 function sessionById(id: string) {
@@ -43,7 +38,7 @@ function paint(): void {
   if (detail) {
     const s = view.selected ? sessionById(view.selected) : null;
     detail.innerHTML = s
-      ? renderDetail(s, view.artifacts.get(s.id) ?? null)
+      ? renderSessionDetail(s, view.artifacts.get(s.id) ?? null)
       : `<p class="empty">select a session</p>`;
   }
   const sel = view.selected;
