@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { renderFleet, renderShell, escapeHtml } from "./render.js";
-import type { MachineView } from "../protocol.js";
+import { renderFleet, renderInbox, renderShell, escapeHtml } from "./render.js";
+import type { MachineView, PendingPrompt } from "../protocol.js";
 
 describe("escapeHtml", () => {
   it("escapes markup-significant characters", () => {
@@ -68,6 +68,42 @@ describe("renderFleet", () => {
   it("shows an empty-state when there are no machines", () => {
     const html = renderFleet([]);
     expect(html.toLowerCase()).toContain("no ");
+  });
+});
+
+describe("renderInbox", () => {
+  it("renders one card per prompt with Approve/Deny buttons carrying the promptId", () => {
+    const prompts: PendingPrompt[] = [
+      { promptId: "p1", sessionId: "s1", machineId: "alpha", tool: "bash", detail: "rm -rf build" },
+    ];
+    const html = renderInbox(prompts);
+    expect(html).toContain("bash");
+    expect(html).toContain("rm -rf build");
+    expect(html).toContain('data-prompt-id="p1"');
+    expect(html).toContain('data-action="approve"');
+    expect(html).toContain('data-action="deny"');
+  });
+
+  it("html-escapes hostile prompt fields so no markup is injected", () => {
+    const prompts: PendingPrompt[] = [
+      {
+        promptId: `"><img src=x onerror=alert(1)>`,
+        sessionId: `</span><script>evil()</script>`,
+        machineId: `<b>m</b>`,
+        tool: `<i>t</i>`,
+        detail: `<script>steal()</script>`,
+      },
+    ];
+    const html = renderInbox(prompts);
+    expect(html).not.toContain("<img src=x");
+    expect(html).not.toContain("<script>evil()</script>");
+    expect(html).not.toContain("<script>steal()</script>");
+    expect(html).not.toContain("<b>m</b>");
+    expect(html).toContain("&lt;script&gt;steal()&lt;/script&gt;");
+  });
+
+  it("shows an empty-state when the inbox is empty", () => {
+    expect(renderInbox([]).toLowerCase()).toContain("no pending");
   });
 });
 
