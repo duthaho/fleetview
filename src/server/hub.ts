@@ -3,6 +3,7 @@
 // browsers as snapshot-then-patches; browsers get the current snapshot on connect
 // and live patches thereafter. A node disconnect drops only that machine and
 // patches browsers. Decisions from a browser route back to the owning node.
+import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
 import { attachAuth } from "./auth.js";
 import { FleetState } from "./state.js";
@@ -26,17 +27,27 @@ export class Hub {
 
   constructor(private readonly opts: HubOptions) {}
 
-  /** Start listening; resolves with the bound port. */
+  /** Start a standalone ws server on `port`; resolves with the bound port. */
   listen(port: number): Promise<number> {
     this.wss = new WebSocketServer({ port });
     const wss = this.wss;
+    this.wireConnections(wss);
+    return new Promise((resolve) => wss.once("listening", () => resolve((wss.address() as { port: number }).port)));
+  }
+
+  /** Attach the ws hub to an existing http server so it shares the origin (D3). */
+  attach(server: HttpServer): void {
+    this.wss = new WebSocketServer({ server });
+    this.wireConnections(this.wss);
+  }
+
+  private wireConnections(wss: WebSocketServer): void {
     wss.on("connection", (sock) => {
       attachAuth(sock, this.opts.token, (machineId, role) => {
         if (role === "node") this.registerNode(sock, machineId);
         else this.registerBrowser(sock);
       });
     });
-    return new Promise((resolve) => wss.once("listening", () => resolve((wss.address() as { port: number }).port)));
   }
 
   close(): Promise<void> {
