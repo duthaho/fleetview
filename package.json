@@ -1,0 +1,27 @@
+{
+  "name": "fleetview",
+  "version": "0.1.0",
+  "description": "Open-source control plane for Claude Code sessions across multiple machines — live fleet dashboard, remote-approval inbox, inline evidence.",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "fleetview-server": "dist/server/main.js",
+    "fleetview-node": "dist/node/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.web.json",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
