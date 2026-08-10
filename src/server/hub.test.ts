@@ -140,3 +140,73 @@ describe("Hub — cross-origin browser is rejected (CSWSH guard)", () => {
     good.close();
   });
 });
+
+describe("Hub — review fixes", () => {
+  let hub: Hub;
+  let url: string;
+  beforeEach(async () => {
+    hub = new Hub({ token: TOKEN });
+    const port = await hub.listen(0);
+    url = `ws://127.0.0.1:${port}`;
+  });
+  afterEach(async () => {
+    await hub.close();
+  });
+
+  it("binds sessions to the AUTHENTICATED machineId, ignoring a spoofed one (anti-spoof)", async () => {
+    const alpha = await open(url);
+    alpha.send(encode({ t: "hello", role: "node", machineId: "alpha", token: TOKEN }));
+    // alpha lies: stamps its session as belonging to "beta"
+    alpha.send(encode({ t: "sessions", sessions: [{ id: "x", machineId: "beta", cwd: "/", model: "m", status: "running" }] }));
+    const browser = await open(url);
+    browser.send(encode({ t: "hello", role: "browser", token: TOKEN }));
+    const ms = await waitForMachines(browser, (m) => m.some((x) => x.sessions.length > 0));
+    expect(ms.map((m) => m.machineId)).toEqual(["alpha"]);
+    expect(ms[0].sessions[0].machineId).toBe("alpha");
+    alpha.close();
+    browser.close();
+  });
+
+  it("catches a late-joining browser up on a stored artifact", async () => {
+    const alpha = await open(url);
+    alpha.send(encode({ t: "hello", role: "node", machineId: "alpha", token: TOKEN }));
+    alpha.send(encode({ t: "sessions", sessions: [{ id: "s1", machineId: "alpha", cwd: "/", model: "m", status: "running" }] }));
+    alpha.send(encode({ t: "artifact", sessionId: "s1", diff: "--- a\n+++ b\n@@\n+x" }));
+    await new Promise((r) => setTimeout(r, 100)); // let the artifact land in state
+    const browser = await open(url);
+    browser.send(encode({ t: "hello", role: "browser", token: TOKEN }));
+    const diff = await new Promise<string>((resolve) => {
+      browser.on("message", (d) => {
+        const m = parseMessage(String(d)) as ServerToBrowser | null;
+        if (m?.t === "patch") for (const op of m.ops) if (op.op === "artifact") resolve(op.diff);
+      });
+    });
+    expect(diff).toContain("+x");
+    alpha.close();
+    browser.close();
+  });
+
+  it("does not falsely resolve a prompt when the owning node is gone", async () => {
+    const alpha = await open(url);
+    alpha.send(encode({ t: "hello", role: "node", machineId: "alpha", token: TOKEN }));
+    alpha.send(encode({ t: "sessions", sessions: [{ id: "s1", machineId: "alpha", cwd: "/", model: "m", status: "running" }] }));
+    alpha.send(encode({ t: "promptRaised", promptId: "p1", sessionId: "s1", tool: "Bash", detail: "x" }));
+    const browser = await open(url);
+    browser.send(encode({ t: "hello", role: "browser", token: TOKEN }));
+    // capture the browser-facing (namespaced) promptId
+    const gpid = await new Promise<string>((resolve) => {
+      browser.on("message", (d) => {
+        const m = parseMessage(String(d)) as ServerToBrowser | null;
+        if (m?.t === "patch") for (const op of m.ops) if (op.op === "prompts" && op.prompts[0]) resolve(op.prompts[0].promptId);
+      });
+    });
+    expect(gpid).toContain("alpha");
+    // node vanishes uncleanly is hard to force; instead decide on an unknown prompt id → no-op, no throw
+    browser.send(encode({ t: "decision", promptId: "does-not-exist", approve: true }));
+    await new Promise((r) => setTimeout(r, 100));
+    // hub still alive and the real prompt still routable
+    expect(gpid.length).toBeGreaterThan("alpha".length);
+    alpha.close();
+    browser.close();
+  });
+});

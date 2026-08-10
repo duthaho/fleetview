@@ -78,3 +78,23 @@ describe("renderSessionDetail", () => {
     expect(html).toContain("&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;");
   });
 });
+
+describe("parseUnifiedDiff — hunk-aware classification (review fix)", () => {
+  it("classifies content lines starting with +++/--- inside a hunk as add/del, not meta", async () => {
+    const { parseUnifiedDiff } = await import("./diff.js");
+    const diff = [
+      "--- a/f",       // file header (meta)
+      "+++ b/f",       // file header (meta)
+      "@@ -1,2 +1,2 @@",
+      "+++ added marker line",   // ADD inside hunk
+      "--- removed marker line", // DEL inside hunk
+      " context",
+    ].join("\n");
+    const rows = parseUnifiedDiff(diff);
+    expect(rows[0]!.kind).toBe("meta");
+    expect(rows[1]!.kind).toBe("meta");
+    expect(rows[2]!.kind).toBe("hunk");
+    expect(rows[3]!.kind).toBe("add");
+    expect(rows[4]!.kind).toBe("del");
+  });
+});

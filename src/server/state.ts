@@ -54,4 +54,9 @@ export class FleetState {
   artifactFor(sessionId: string): string | undefined {
     return this.artifacts.get(sessionId);
   }
+
+  /** All stored artifacts — used to catch up a browser that connects late. */
+  listArtifacts(): { sessionId: string; diff: string }[] {
+    return [...this.artifacts.entries()].map(([sessionId, diff]) => ({ sessionId, diff }));
+  }
 }

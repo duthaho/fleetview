@@ -22,12 +22,21 @@ export interface DiffRow {
  */
 export function parseUnifiedDiff(text: string): DiffRow[] {
   if (text === "") return [];
-  return text.split("\n").map((line) => ({ kind: classify(line), text: line }));
+  // Track hunk state: inside a hunk body the first character is the marker, so
+  // a content line like "+++ note" is an ADDED line, not a file header. The
+  // `--- a/…` / `+++ b/…` headers only appear before the first `@@`.
+  let inHunk = false;
+  return text.split("\n").map((line) => {
+    if (line.startsWith("@@")) {
+      inHunk = true;
+      return { kind: "hunk" as DiffKind, text: line };
+    }
+    return { kind: classify(line, inHunk), text: line };
+  });
 }
 
-function classify(line: string): DiffKind {
-  if (line.startsWith("@@")) return "hunk";
-  if (line.startsWith("+++") || line.startsWith("---")) return "meta";
+function classify(line: string, inHunk: boolean): DiffKind {
+  if (!inHunk && (line.startsWith("+++") || line.startsWith("---"))) return "meta";
   if (line.startsWith("+")) return "add";
   if (line.startsWith("-")) return "del";
   return "context";

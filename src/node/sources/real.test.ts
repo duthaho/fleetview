@@ -75,3 +75,14 @@ describe("readClaudeSessions", () => {
     expect(readClaudeSessions(base, "m")).toEqual([]);
   });
 });
+
+describe("real reader — future mtime guard (review fix)", () => {
+  it("marks an implausibly future-dated transcript done, not running forever", () => {
+    const base = makeClaudeDir();
+    const p = writeSession(base, "-p", "future.jsonl", [{ type: "user", sessionId: "future", cwd: "/p" }]);
+    const future = new Date(Date.now() + 3600_000);
+    utimesSync(p, future, future);
+    const s = readClaudeSessions(base, "m").find((x) => x.id === "future");
+    expect(s!.status).toBe("done");
+  });
+});

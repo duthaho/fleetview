@@ -68,12 +68,20 @@ export function verifyHello(msg: WireMessage, expected: string): boolean {
  * token, call `onAuthed(machineId, role)`. Otherwise close with the auth-fail
  * code + reason and never register.
  */
+export const HANDSHAKE_TIMEOUT_MS = 10_000;
+
 export function attachAuth(
   sock: WebSocket,
   expected: string,
   onAuthed: (machineId: string, role: "node" | "browser") => void,
+  handshakeTimeoutMs: number = HANDSHAKE_TIMEOUT_MS,
 ): void {
+  // A client that connects but never sends a hello must not hold a slot forever
+  // (DoS/leak). Close it if the handshake doesn't arrive in time.
+  const timer = setTimeout(() => sock.close(AUTH_FAIL_CODE, AUTH_FAIL_REASON), handshakeTimeoutMs);
+  if (typeof timer.unref === "function") timer.unref();
   sock.once("message", (data: unknown) => {
+    clearTimeout(timer);
     const msg = parseMessage(String(data));
     if (!msg || msg.t !== "hello" || !verifyHello(msg, expected)) {
       sock.close(AUTH_FAIL_CODE, AUTH_FAIL_REASON);

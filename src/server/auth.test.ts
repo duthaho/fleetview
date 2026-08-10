@@ -119,3 +119,16 @@ describe("originAllowed — cross-site WebSocket hijack guard", () => {
     expect(originAllowed("not a url", "localhost:4300")).toBe(false);
   });
 });
+
+describe("attachAuth — handshake timeout (review fix)", () => {
+  it("closes a connection that never sends a hello", async () => {
+    const wss = new WebSocketServer({ port: 0 });
+    await new Promise((r) => wss.once("listening", r));
+    const port = (wss.address() as { port: number }).port;
+    wss.on("connection", (sock) => attachAuth(sock, "secret", () => {}, 200)); // 200ms timeout
+    const silent = new WebSocket(`ws://127.0.0.1:${port}`);
+    const code = await new Promise<number>((resolve) => silent.once("close", (c) => resolve(c)));
+    expect(code).toBe(AUTH_FAIL_CODE);
+    await new Promise((r) => wss.close(r));
+  });
+});

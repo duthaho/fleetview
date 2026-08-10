@@ -74,7 +74,10 @@ function readOneSession(
       model = (msg as { model: string }).model;
     }
   }
-  const status: SessionStatus = now - mtimeMs <= RUNNING_WITHIN_MS ? "running" : "done";
+  // Running only if touched within the window AND not implausibly future-dated
+  // (clock skew beyond a minute → treat as done, never "running forever").
+  const age = now - mtimeMs;
+  const status: SessionStatus = age >= -60_000 && age <= RUNNING_WITHIN_MS ? "running" : "done";
   return { id, machineId, cwd, model, status };
 }
 
