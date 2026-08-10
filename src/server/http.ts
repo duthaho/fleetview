@@ -16,6 +16,9 @@ const CLIENT_JS_PATH = join(HERE, "..", "web", "client.js");
 export interface DashboardOptions {
   token: string;
   port?: number;
+  /** Bind address. Default 127.0.0.1 (safe); set to 0.0.0.0 to expose the
+   * fleet server to remote nodes — do so behind a firewall (network-exposure). */
+  host?: string;
 }
 
 export interface Dashboard {
@@ -61,9 +64,10 @@ export function createDashboard(token: string): { server: Server; hub: Hub } {
 export function startDashboard(opts: DashboardOptions): Promise<Dashboard> {
   const { server, hub } = createDashboard(opts.token);
   const port = opts.port ?? 4300;
+  const host = opts.host ?? "127.0.0.1";
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, () => {
+    server.listen(port, host, () => {
       const addr = server.address();
       const boundPort = typeof addr === "object" && addr ? addr.port : port;
       resolve({

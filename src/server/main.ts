@@ -8,8 +8,11 @@ import { startDashboard } from "./http.js";
 async function main(): Promise<void> {
   const token = requireToken(process.env.FLEETVIEW_TOKEN);
   const port = Number(process.env.PORT ?? 4300);
-  const dash = await startDashboard({ token, port });
-  console.log(`fleetview-server listening on http://127.0.0.1:${dash.port}`);
+  // Safe default: bind localhost. Multi-machine fleets set HOST=0.0.0.0
+  // explicitly (behind a firewall) so remote nodes can reach the server.
+  const host = process.env.HOST ?? "127.0.0.1";
+  const dash = await startDashboard({ token, port, host });
+  console.log(`fleetview-server listening on http://${host}:${dash.port}`);
 }
 
 // Only run when executed directly (not when imported by tests).

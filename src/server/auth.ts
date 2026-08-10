@@ -29,6 +29,27 @@ export function requireToken(value: string | undefined): string {
   return value;
 }
 
+// Close code for a rejected cross-origin WebSocket (CSWSH mitigation).
+export const BAD_ORIGIN_CODE = 4003;
+export const BAD_ORIGIN_REASON = "bad origin";
+
+/**
+ * Cross-site WebSocket hijacking guard. A browser always sends an `Origin`
+ * header; it must match the `Host` the request came in on (same-origin). A
+ * non-browser client (the fleet-node `ws` client) sends no Origin — allowed,
+ * because it still must pass the shared-token check. `Origin: null` (sandboxed
+ * document) is rejected.
+ */
+export function originAllowed(origin: string | undefined, host: string | undefined): boolean {
+  if (origin === undefined) return true; // non-browser client (node)
+  if (origin === "null" || !host) return false;
+  try {
+    return new URL(origin).host === host;
+  } catch {
+    return false;
+  }
+}
+
 /** True iff `msg` is a well-formed hello whose token matches `expected`. */
 export function verifyHello(msg: WireMessage, expected: string): boolean {
   // Fail closed: with no configured token, reject everything.

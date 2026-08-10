@@ -110,3 +110,33 @@ describe("Hub (real in-process ws, 2 nodes + 1 browser)", () => {
     expect(await closed).toBe(4001);
   });
 });
+
+describe("Hub — cross-origin browser is rejected (CSWSH guard)", () => {
+  let hub: Hub;
+  let url: string;
+  beforeEach(async () => {
+    hub = new Hub({ token: TOKEN });
+    const port = await hub.listen(0);
+    url = `ws://127.0.0.1:${port}`;
+  });
+  afterEach(async () => {
+    await hub.close();
+  });
+
+  it("closes a connection whose Origin is a foreign site with code 4003", async () => {
+    const evil = new WebSocket(url, { origin: "http://evil.example.com" });
+    const code = await new Promise<number>((resolve) => {
+      evil.once("close", (c) => resolve(c));
+    });
+    expect(code).toBe(4003);
+  });
+
+  it("still accepts a same-origin browser and an origin-less node client", async () => {
+    const host = new URL(url).host;
+    const good = new WebSocket(url, { origin: `http://${host}` });
+    good.on("open", () => good.send(encode({ t: "hello", role: "browser" })));
+    const snap = (await next(good)) as ServerToBrowser;
+    expect(snap.t).toBe("snapshot");
+    good.close();
+  });
+});

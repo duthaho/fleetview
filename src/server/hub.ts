@@ -5,7 +5,7 @@
 // patches browsers. Decisions from a browser route back to the owning node.
 import type { Server as HttpServer } from "node:http";
 import { WebSocketServer, type WebSocket } from "ws";
-import { attachAuth } from "./auth.js";
+import { attachAuth, originAllowed, BAD_ORIGIN_CODE, BAD_ORIGIN_REASON } from "./auth.js";
 import { FleetState } from "./state.js";
 import {
   encode,
@@ -42,7 +42,13 @@ export class Hub {
   }
 
   private wireConnections(wss: WebSocketServer): void {
-    wss.on("connection", (sock) => {
+    wss.on("connection", (sock, req) => {
+      // CSWSH guard: a browser's Origin must be same-origin (D3). Node clients
+      // send no Origin and are still gated by the shared token below.
+      if (!originAllowed(req.headers.origin, req.headers.host)) {
+        sock.close(BAD_ORIGIN_CODE, BAD_ORIGIN_REASON);
+        return;
+      }
       attachAuth(sock, this.opts.token, (machineId, role) => {
         if (role === "node") this.registerNode(sock, machineId);
         else this.registerBrowser(sock);

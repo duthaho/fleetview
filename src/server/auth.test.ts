@@ -98,3 +98,24 @@ describe("auth hardening (security review)", () => {
     expect(requireToken("secret")).toBe("secret");
   });
 });
+
+describe("originAllowed — cross-site WebSocket hijack guard", () => {
+  it("allows a same-origin browser (Origin host == Host)", async () => {
+    const { originAllowed } = await import("./auth.js");
+    expect(originAllowed("http://localhost:4300", "localhost:4300")).toBe(true);
+    expect(originAllowed("https://fleet.example.com", "fleet.example.com")).toBe(true);
+  });
+  it("rejects a cross-origin browser (the attack)", async () => {
+    const { originAllowed } = await import("./auth.js");
+    expect(originAllowed("http://evil.example.com", "localhost:4300")).toBe(false);
+  });
+  it("allows a node client with no Origin header (token still required)", async () => {
+    const { originAllowed } = await import("./auth.js");
+    expect(originAllowed(undefined, "localhost:4300")).toBe(true);
+  });
+  it("rejects Origin: null (sandboxed) and unparsable origins", async () => {
+    const { originAllowed } = await import("./auth.js");
+    expect(originAllowed("null", "localhost:4300")).toBe(false);
+    expect(originAllowed("not a url", "localhost:4300")).toBe(false);
+  });
+});
