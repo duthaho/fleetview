@@ -268,6 +268,9 @@ export class RealSource implements SessionSource {
   resolvePrompt(_promptId: string, _approve: boolean): void {
     /* nothing to resolve — read-only */
   }
+  async getDetail(sessionId: string): Promise<SessionEvent[]> {
+    return getSessionDetail(this.baseDir, sessionId);
+  }
   start(): void {
     const emit = () => this.sessionsCb?.(this.currentSessions());
     emit();

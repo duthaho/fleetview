@@ -206,6 +206,26 @@ describe("getSessionDetail (T3, D3/D8)", () => {
   });
 });
 
+describe("RealSource.getDetail (T4, D4)", () => {
+  it("returns the fixture events for a known session", async () => {
+    const base = makeClaudeDir();
+    writeSession(base, "-p", "gd-1.jsonl", [
+      { type: "assistant", sessionId: "gd-1", cwd: "/p", message: { model: "m", content: [{ type: "text", text: "yo" }, { type: "tool_use", name: "Read" }] } },
+    ]);
+    const src = new RealSource("m", base);
+    await expect(src.getDetail("gd-1")).resolves.toEqual([
+      { kind: "text", text: "yo" },
+      { kind: "tool", text: "Read" },
+    ]);
+  });
+
+  it("an unknown id → []", async () => {
+    const base = makeClaudeDir();
+    const src = new RealSource("m", base);
+    await expect(src.getDetail("nope")).resolves.toEqual([]);
+  });
+});
+
 describe("real reader — future mtime guard (review fix)", () => {
   it("marks an implausibly future-dated transcript done, not running forever", () => {
     const base = makeClaudeDir();
