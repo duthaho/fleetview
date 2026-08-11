@@ -1,0 +1,26 @@
+[Unit]
+Description=fleetview server (dashboard + WebSocket hub)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Edit User/paths to match your box.
+User=ubuntu
+WorkingDirectory=/home/ubuntu/agentkit-workspace/showcase/fleetview
+# FLEETVIEW_TOKEN lives here (chmod 600). PORT/HOST optional.
+EnvironmentFile=/etc/fleetview.env
+Environment=PORT=4300
+# Bind localhost: the public edge is the Cloudflare Tunnel, not this port.
+Environment=HOST=127.0.0.1
+ExecStart=/usr/bin/node dist/server/main.js
+Restart=always
+RestartSec=2
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

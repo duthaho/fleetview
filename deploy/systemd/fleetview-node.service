@@ -1,0 +1,23 @@
+[Unit]
+Description=fleetview node (this machine's real Claude Code sessions)
+After=fleetview-server.service network-online.target
+Wants=network-online.target
+# The node connects to the local server; start it after the server.
+Requires=fleetview-server.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/agentkit-workspace/showcase/fleetview
+EnvironmentFile=/etc/fleetview.env
+# The node dials the local server (NOT the public tunnel).
+Environment=FLEETVIEW_SERVER=ws://127.0.0.1:4300
+# %H = this host's name; --source real reads ~/.claude read-only.
+ExecStart=/usr/bin/node dist/node/main.js --machine %H --source real
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
