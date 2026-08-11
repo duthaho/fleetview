@@ -88,6 +88,33 @@ unblocks and a diff artifact renders. It prints each step as it verifies it.
   to "no sessions" rather than crashing. A fleet console shows the *live* fleet,
   so it surfaces only sessions touched in the last day, newest first, capped to
   50 — not the entire months-deep transcript archive.
+- **`agentkit`** — connects to a local [agentkit](https://github.com/duthaho/agentkit)
+  escalation bridge (a Unix socket) and surfaces **real** permission prompts a
+  live agent raises. Approve/Deny in the dashboard actually unblocks/blocks the
+  agent (see [Gating real agents](#gating-real-agents-agentkit-bridge)).
+
+## Gating real agents (agentkit bridge)
+
+`--source real` is read-only; **`--source agentkit`** makes the Approval inbox
+*real*. agentkit already gates every agent tool-permission prompt (its
+`canUseTool` → Telegram escalation); the bridge exposes those same escalations
+to fleetview so you can approve them from the dashboard.
+
+```bash
+# 1. agentkit, with the bridge turned on (a Unix socket path). Off by default —
+#    unset, agentkit behaves exactly as before (Telegram-only).
+AGENTKIT_ESC_BRIDGE=/run/user/$UID/agentkit-esc.sock  <start agentkit>
+
+# 2. a fleetview node pointed at the same socket (same machine)
+node dist/node/main.js --machine this-box --source agentkit \
+  --bridge /run/user/$UID/agentkit-esc.sock
+```
+
+Now a real permission prompt an agent raises appears in the fleetview inbox;
+Approve → the agent proceeds, Deny → it doesn't. Telegram and fleetview stay in
+sync — whoever decides first wins, and the other surface shows "resolved via
+fleetview" / clears. The bridge is a **local Unix socket (mode 0600)**: local by
+construction, no network surface, no extra token. Same-machine only in v1.
 
 ## Deploy: a public dashboard over Cloudflare Tunnel
 
@@ -120,12 +147,11 @@ instead of the quick tunnel above.
   token is a credential, not a substitute for network controls.
 - **In-memory only.** No database; a restart drops history and nodes re-announce.
 
-## Roadmap — what v1 does *not* do yet
+## Roadmap — what's *not* done yet
 
-- **Gate real Claude Code agents.** In v1, Approve/Deny controls the *simulated*
-  source end-to-end; wiring the decision into a live agent's permission prompt
-  (via [agentkit](https://github.com/duthaho/agentkit)'s `canUseTool` engine) is
-  the named next step.
+- **Gate real agents across machines.** Real-agent gating works today on the
+  **same machine** via the agentkit bridge (above). Remote gating (agent on one
+  box, dashboard approving from another) is the next step.
 - Persistence/history, per-node identities (v1 is one shared token), cost
   metering, and artifact types beyond unified diffs.
 
