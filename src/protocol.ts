@@ -9,6 +9,18 @@ export interface Session {
   cwd: string;
   model: string;
   status: SessionStatus;
+  // Optional activity summary (the real source fills these from the transcript).
+  lastActivity?: string;
+  lastTool?: string;
+  messages?: number;
+  tokens?: number;
+  costUsd?: number;
+}
+
+/** One entry of a session's recent-activity tail (D3). */
+export interface SessionEvent {
+  kind: "text" | "tool";
+  text: string;
 }
 
 export interface PendingPrompt {
@@ -25,15 +37,22 @@ export type NodeToServer =
   | { t: "sessions"; sessions: Session[] }
   | { t: "promptRaised"; promptId: string; sessionId: string; tool: string; detail: string }
   | { t: "artifact"; sessionId: string; diff: string }
-  | { t: "promptResolved"; promptId: string; approve: boolean };
+  | { t: "promptResolved"; promptId: string; approve: boolean }
+  | { t: "sessionDetail"; sessionId: string; events: SessionEvent[] };
+
+// --- node → server (detail reply) ---
+// (added to NodeToServer below)
 
 // --- browser → server ---
 export type BrowserToServer =
   | { t: "hello"; role: "browser"; token?: string }
-  | { t: "decision"; promptId: string; approve: boolean };
+  | { t: "decision"; promptId: string; approve: boolean }
+  | { t: "requestDetail"; sessionId: string };
 
 // --- server → node ---
-export type ServerToNode = { t: "decision"; promptId: string; approve: boolean };
+export type ServerToNode =
+  | { t: "decision"; promptId: string; approve: boolean }
+  | { t: "requestDetail"; sessionId: string };
 
 // --- server → browser ---
 export interface MachineView {
@@ -43,7 +62,8 @@ export interface MachineView {
 export type PatchOp =
   | { op: "machines"; machines: MachineView[] }
   | { op: "prompts"; prompts: PendingPrompt[] }
-  | { op: "artifact"; sessionId: string; diff: string };
+  | { op: "artifact"; sessionId: string; diff: string }
+  | { op: "detail"; sessionId: string; events: SessionEvent[] };
 export type ServerToBrowser =
   | { t: "snapshot"; machines: MachineView[] }
   | { t: "patch"; ops: PatchOp[] };
@@ -55,6 +75,11 @@ function isStr(v: unknown): v is string {
 }
 function isBool(v: unknown): v is boolean {
   return typeof v === "boolean";
+}
+function isEvent(v: unknown): v is SessionEvent {
+  if (typeof v !== "object" || v === null) return false;
+  const e = v as Record<string, unknown>;
+  return (e.kind === "text" || e.kind === "tool") && isStr(e.text);
 }
 function isSession(v: unknown): v is Session {
   if (typeof v !== "object" || v === null) return false;
@@ -94,6 +119,12 @@ export function parseMessage(raw: string): WireMessage | null {
     case "promptResolved":
     case "decision":
       return isStr(m.promptId) && isBool(m.approve) ? (m as WireMessage) : null;
+    case "requestDetail":
+      return isStr(m.sessionId) ? (m as WireMessage) : null;
+    case "sessionDetail":
+      return isStr(m.sessionId) && Array.isArray(m.events) && m.events.every(isEvent)
+        ? (m as WireMessage)
+        : null;
     case "snapshot":
       return Array.isArray(m.machines) ? (m as WireMessage) : null;
     case "patch":
