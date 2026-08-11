@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { WebSocket } from "ws";
 import { Hub } from "./hub.js";
-import { encode, parseMessage, type MachineView, type ServerToBrowser, type WireMessage } from "../protocol.js";
+import { encode, parseMessage, type MachineView, type ServerToBrowser, type SessionEvent, type WireMessage } from "../protocol.js";
 
 const TOKEN = "secret";
 
@@ -108,6 +108,127 @@ describe("Hub (real in-process ws, 2 nodes + 1 browser)", () => {
     const closed = new Promise<number>((resolve) => bad.once("close", (code) => resolve(code)));
     bad.send(encode({ t: "hello", role: "node", machineId: "evil", token: "WRONG" }));
     expect(await closed).toBe(4001);
+  });
+});
+
+/** Resolve when a browser receives a `detail` op for `sessionId`. */
+function waitForDetail(ws: WebSocket, sessionId: string): Promise<SessionEvent[]> {
+  return new Promise((resolve) => {
+    const onMsg = (d: unknown) => {
+      const m = parseMessage(String(d)) as ServerToBrowser | null;
+      if (m?.t === "patch") {
+        for (const op of m.ops) {
+          if (op.op === "detail" && op.sessionId === sessionId) {
+            ws.off("message", onMsg);
+            resolve(op.events);
+          }
+        }
+      }
+    };
+    ws.on("message", onMsg);
+  });
+}
+
+describe("Hub — detail round-trip (T7, requester-scoped + owner-checked)", () => {
+  let hub: Hub;
+  let url: string;
+  beforeEach(async () => {
+    hub = new Hub({ token: TOKEN });
+    const port = await hub.listen(0);
+    url = `ws://127.0.0.1:${port}`;
+  });
+  afterEach(async () => {
+    await hub.close();
+  });
+
+  it("routes a requestDetail to the owning node and replies ONLY to the requesting browser", async () => {
+    const alpha = await open(url);
+    alpha.send(encode({ t: "hello", role: "node", machineId: "alpha", token: TOKEN }));
+    alpha.send(encode({ t: "sessions", sessions: [{ id: "s1", machineId: "alpha", cwd: "/", model: "m", status: "running" }] }));
+    // the node answers a requestDetail with a fixed tail
+    const fixture: SessionEvent[] = [{ kind: "text", text: "hi" }, { kind: "tool", text: "Bash" }];
+    alpha.on("message", (d) => {
+      const m = parseMessage(String(d));
+      if (m?.t === "requestDetail") alpha.send(encode({ t: "sessionDetail", sessionId: m.sessionId, events: fixture }));
+    });
+
+    const requester = await open(url);
+    // Attach the machine-wait BEFORE the next await so the snapshot isn't missed.
+    const reqReady = waitForMachines(requester, (ms) => ms.some((m) => m.sessions.length > 0));
+    requester.send(encode({ t: "hello", role: "browser", token: TOKEN }));
+    const bystander = await open(url);
+    const bysReady = waitForMachines(bystander, (ms) => ms.some((m) => m.sessions.length > 0));
+    bystander.send(encode({ t: "hello", role: "browser", token: TOKEN }));
+    await reqReady;
+    await bysReady;
+
+    // bystander must NOT get the detail
+    let bystanderGot = false;
+    bystander.on("message", (d) => {
+      const m = parseMessage(String(d)) as ServerToBrowser | null;
+      if (m?.t === "patch") for (const op of m.ops) if (op.op === "detail") bystanderGot = true;
+    });
+
+    requester.send(encode({ t: "requestDetail", sessionId: "s1" }));
+    const events = await waitForDetail(requester, "s1");
+    expect(events).toEqual(fixture);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(bystanderGot).toBe(false);
+
+    alpha.close();
+    requester.close();
+    bystander.close();
+  });
+
+  it("drops a sessionDetail from a node that does NOT own the session (owner-check)", async () => {
+    const alpha = await open(url);
+    alpha.send(encode({ t: "hello", role: "node", machineId: "alpha", token: TOKEN }));
+    alpha.send(encode({ t: "sessions", sessions: [{ id: "s1", machineId: "alpha", cwd: "/", model: "m", status: "running" }] }));
+    const beta = await open(url);
+    beta.send(encode({ t: "hello", role: "node", machineId: "beta", token: TOKEN }));
+    beta.send(encode({ t: "sessions", sessions: [{ id: "s2", machineId: "beta", cwd: "/", model: "m", status: "running" }] }));
+
+    const browser = await open(url);
+    const ready = waitForMachines(browser, (ms) => ms.length === 2);
+    browser.send(encode({ t: "hello", role: "browser", token: TOKEN }));
+    await ready;
+
+    // browser requests detail for s1 (owned by alpha)
+    browser.send(encode({ t: "requestDetail", sessionId: "s1" }));
+    // beta (NOT the owner) injects detail for s1 — must be dropped
+    beta.send(encode({ t: "sessionDetail", sessionId: "s1", events: [{ kind: "text", text: "spoof" }] }));
+
+    let got: SessionEvent[] | null = null;
+    browser.on("message", (d) => {
+      const m = parseMessage(String(d)) as ServerToBrowser | null;
+      if (m?.t === "patch") for (const op of m.ops) if (op.op === "detail" && op.sessionId === "s1") got = op.events;
+    });
+    await new Promise((r) => setTimeout(r, 80));
+    expect(got).toBeNull(); // beta's spoofed reply dropped; alpha never answered
+
+    alpha.close();
+    beta.close();
+    browser.close();
+  });
+
+  it("an unknown session → no crash, no detail", async () => {
+    const alpha = await open(url);
+    alpha.send(encode({ t: "hello", role: "node", machineId: "alpha", token: TOKEN }));
+    alpha.send(encode({ t: "sessions", sessions: [{ id: "s1", machineId: "alpha", cwd: "/", model: "m", status: "running" }] }));
+    const browser = await open(url);
+    const ready = waitForMachines(browser, (ms) => ms.some((m) => m.sessions.length > 0));
+    browser.send(encode({ t: "hello", role: "browser", token: TOKEN }));
+    await ready;
+
+    browser.send(encode({ t: "requestDetail", sessionId: "ghost" }));
+    await new Promise((r) => setTimeout(r, 60));
+    // hub still alive & responsive
+    alpha.send(encode({ t: "sessions", sessions: [{ id: "s1", machineId: "alpha", cwd: "/", model: "m", status: "done" }] }));
+    const ms = await waitForMachines(browser, (m) => m.some((x) => x.sessions[0]?.status === "done"));
+    expect(ms[0].sessions[0].status).toBe("done");
+
+    alpha.close();
+    browser.close();
   });
 });
 
