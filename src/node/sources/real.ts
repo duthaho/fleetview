@@ -78,6 +78,12 @@ function readOneSession(
   let id = file.replace(/\.jsonl$/, "");
   let cwd = "";
   let model = "";
+  // Activity summary (D1/D8): accumulated in the single pass we already make.
+  let lastActivity = "";
+  let lastTool = "";
+  let messages = 0;
+  let tokens = 0;
+  let costUsd = 0;
   for (const line of text.split("\n")) {
     if (line.trim() === "") continue;
     let rec: Record<string, unknown>;
@@ -88,6 +94,11 @@ function readOneSession(
     }
     if (typeof rec.sessionId === "string" && rec.sessionId) id = rec.sessionId;
     if (typeof rec.cwd === "string" && rec.cwd) cwd = rec.cwd;
+    if (typeof rec.timestamp === "string" && rec.timestamp > lastActivity) lastActivity = rec.timestamp;
+    if (rec.type === "user" || rec.type === "assistant") messages++;
+    for (const name of toolNames(rec)) lastTool = name; // last one wins (most recent)
+    tokens += usageTokens(rec);
+    costUsd += costOf(rec);
     const msg = rec.message;
     if (msg && typeof msg === "object" && typeof (msg as { model?: unknown }).model === "string") {
       model = (msg as { model: string }).model;
@@ -97,7 +108,46 @@ function readOneSession(
   // (clock skew beyond a minute → treat as done, never "running forever").
   const age = now - mtimeMs;
   const status: SessionStatus = age >= -60_000 && age <= RUNNING_WITHIN_MS ? "running" : "done";
-  return { session: { id, machineId, cwd, model, status }, mtimeMs };
+  return {
+    session: { id, machineId, cwd, model, status, lastActivity, lastTool, messages, tokens, costUsd },
+    mtimeMs,
+  };
+}
+
+// --- transcript field extractors (best-effort, never throw) ---
+
+/** Tool-use names in record order (assistant content blocks). */
+function toolNames(rec: Record<string, unknown>): string[] {
+  const msg = rec.message;
+  if (!msg || typeof msg !== "object") return [];
+  const content = (msg as { content?: unknown }).content;
+  if (!Array.isArray(content)) return [];
+  const names: string[] = [];
+  for (const block of content) {
+    if (block && typeof block === "object") {
+      const b = block as { type?: unknown; name?: unknown };
+      if (b.type === "tool_use" && typeof b.name === "string") names.push(b.name);
+    }
+  }
+  return names;
+}
+
+/** Summed input+output usage tokens for a record (0 if absent). */
+function usageTokens(rec: Record<string, unknown>): number {
+  const msg = rec.message;
+  if (!msg || typeof msg !== "object") return 0;
+  const usage = (msg as { usage?: unknown }).usage;
+  if (!usage || typeof usage !== "object") return 0;
+  const u = usage as { input_tokens?: unknown; output_tokens?: unknown };
+  const inTok = typeof u.input_tokens === "number" ? u.input_tokens : 0;
+  const outTok = typeof u.output_tokens === "number" ? u.output_tokens : 0;
+  return inTok + outTok;
+}
+
+/** Any per-record cost field (costUSD / total_cost_usd), best-effort, else 0. */
+function costOf(rec: Record<string, unknown>): number {
+  const c = rec.costUSD ?? rec.total_cost_usd;
+  return typeof c === "number" ? c : 0;
 }
 
 // A fleet console shows the live/recent fleet, not a months-deep archive:

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readClaudeSessions } from "./real.js";
+import { readClaudeSessions, getSessionDetail, RealSource } from "./real.js";
 
 function makeClaudeDir(): string {
   const base = mkdtempSync(join(tmpdir(), "fleetview-claude-"));
@@ -73,6 +73,73 @@ describe("readClaudeSessions", () => {
     mkdirSync(join(base, "projects"), { recursive: true });
     writeFileSync(join(base, "projects", "stray.txt"), "not a directory of sessions");
     expect(readClaudeSessions(base, "m")).toEqual([]);
+  });
+});
+
+describe("readClaudeSessions — activity summary fields (T2, D1/D8)", () => {
+  it("computes lastActivity, lastTool, messages, tokens, costUsd from a transcript", () => {
+    const base = makeClaudeDir();
+    writeSession(base, "-home-me-proj", "act.jsonl", [
+      { type: "user", sessionId: "act", cwd: "/p", timestamp: "2026-08-10T10:00:00Z" },
+      {
+        type: "assistant",
+        sessionId: "act",
+        cwd: "/p",
+        timestamp: "2026-08-10T10:00:01Z",
+        message: {
+          model: "claude-opus-5",
+          content: [
+            { type: "text", text: "hi there" },
+            { type: "tool_use", name: "Bash" },
+          ],
+          usage: { input_tokens: 100, output_tokens: 20 },
+        },
+        costUSD: 0.05,
+      },
+      {
+        type: "assistant",
+        sessionId: "act",
+        cwd: "/p",
+        timestamp: "2026-08-10T10:00:05Z",
+        message: {
+          model: "claude-opus-5",
+          content: [{ type: "tool_use", name: "Edit" }],
+          usage: { input_tokens: 5, output_tokens: 3 },
+        },
+        costUSD: 0.01,
+      },
+    ]);
+    const s = readClaudeSessions(base, "m").find((x) => x.id === "act")!;
+    expect(s.lastActivity).toBe("2026-08-10T10:00:05Z");
+    expect(s.lastTool).toBe("Edit");
+    expect(s.messages).toBe(3); // 1 user + 2 assistant
+    expect(s.tokens).toBe(128); // 100+20+5+3
+    expect(s.costUsd).toBeCloseTo(0.06);
+  });
+
+  it("a usage-less session → tokens/cost 0, lastTool empty", () => {
+    const base = makeClaudeDir();
+    writeSession(base, "-p", "nousage.jsonl", [
+      { type: "user", sessionId: "nousage", cwd: "/p", timestamp: "2026-08-10T09:00:00Z" },
+      { type: "assistant", sessionId: "nousage", cwd: "/p", message: { model: "m", content: "plain text" } },
+    ]);
+    const s = readClaudeSessions(base, "m").find((x) => x.id === "nousage")!;
+    expect(s.tokens).toBe(0);
+    expect(s.costUsd).toBe(0);
+    expect(s.lastTool).toBe("");
+    expect(s.messages).toBe(2);
+  });
+
+  it("skips malformed lines while still computing fields (codex)", () => {
+    const base = makeClaudeDir();
+    const path = writeSession(base, "-p", "mixed.jsonl", [
+      { type: "user", sessionId: "mixed", cwd: "/p", timestamp: "2026-08-10T08:00:00Z" },
+    ]);
+    writeFileSync(path, JSON.stringify({ type: "user", sessionId: "mixed", cwd: "/p", timestamp: "2026-08-10T08:00:00Z" }) + "\n" + '{"broken\n' + JSON.stringify({ type: "assistant", sessionId: "mixed", cwd: "/p", timestamp: "2026-08-10T08:00:02Z", message: { model: "m", content: [{ type: "tool_use", name: "Grep" }], usage: { input_tokens: 7, output_tokens: 1 } } }) + "\n");
+    const s = readClaudeSessions(base, "m").find((x) => x.id === "mixed")!;
+    expect(s.lastTool).toBe("Grep");
+    expect(s.tokens).toBe(8);
+    expect(s.messages).toBe(2);
   });
 });
 
