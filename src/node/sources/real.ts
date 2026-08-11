@@ -19,10 +19,23 @@ function safeReaddir(dir: string): string[] {
   }
 }
 
-/** Pure reader: scan a `.claude` base dir into Sessions. Never throws. */
-export function readClaudeSessions(baseDir: string, machineId: string, now = Date.now()): Session[] {
+export interface ReadOptions {
+  now?: number;
+  /** Only include sessions touched within this window (ms). Omit = no filter. */
+  activeWithinMs?: number;
+  /** Keep at most this many, most-recently-touched first. Omit = no cap. */
+  limit?: number;
+}
+
+/**
+ * Pure reader: scan a `.claude` base dir into Sessions, newest-touched first.
+ * Never throws. With no options it's a faithful full read; `activeWithinMs` /
+ * `limit` turn a months-deep transcript archive into a live-fleet view.
+ */
+export function readClaudeSessions(baseDir: string, machineId: string, opts: ReadOptions = {}): Session[] {
+  const now = opts.now ?? Date.now();
   const projectsDir = join(baseDir, "projects");
-  const out: Session[] = [];
+  const found: { session: Session; mtimeMs: number }[] = [];
   for (const slug of safeReaddir(projectsDir)) {
     const projDir = join(projectsDir, slug);
     let entries: string[];
@@ -34,12 +47,18 @@ export function readClaudeSessions(baseDir: string, machineId: string, now = Dat
     }
     for (const file of entries) {
       if (!file.endsWith(".jsonl")) continue;
-      const path = join(projDir, file);
-      const session = readOneSession(path, file, machineId, now);
-      if (session) out.push(session);
+      const one = readOneSession(join(projDir, file), file, machineId, now);
+      if (!one) continue;
+      if (opts.activeWithinMs !== undefined) {
+        const age = now - one.mtimeMs;
+        if (age < -60_000 || age > opts.activeWithinMs) continue; // outside the window
+      }
+      found.push(one);
     }
   }
-  return out;
+  found.sort((a, b) => b.mtimeMs - a.mtimeMs); // newest first
+  const capped = opts.limit !== undefined ? found.slice(0, opts.limit) : found;
+  return capped.map((f) => f.session);
 }
 
 function readOneSession(
@@ -47,7 +66,7 @@ function readOneSession(
   file: string,
   machineId: string,
   now: number,
-): Session | null {
+): { session: Session; mtimeMs: number } | null {
   let text: string;
   let mtimeMs: number;
   try {
@@ -78,8 +97,13 @@ function readOneSession(
   // (clock skew beyond a minute → treat as done, never "running forever").
   const age = now - mtimeMs;
   const status: SessionStatus = age >= -60_000 && age <= RUNNING_WITHIN_MS ? "running" : "done";
-  return { id, machineId, cwd, model, status };
+  return { session: { id, machineId, cwd, model, status }, mtimeMs };
 }
+
+// A fleet console shows the live/recent fleet, not a months-deep archive:
+// the real source defaults to sessions touched in the last day, capped.
+export const DEFAULT_ACTIVE_WITHIN_MS = 24 * 3600_000;
+export const DEFAULT_LIMIT = 50;
 
 /** SessionSource wrapper: polls the reader; read-only, so it raises no prompts. */
 export class RealSource implements SessionSource {
@@ -90,6 +114,8 @@ export class RealSource implements SessionSource {
     private readonly machineId: string,
     private readonly baseDir: string = join(homedir(), ".claude"),
     private readonly pollMs = 3000,
+    private readonly activeWithinMs = DEFAULT_ACTIVE_WITHIN_MS,
+    private readonly limit = DEFAULT_LIMIT,
   ) {}
 
   onSessions(cb: (sessions: Session[]) => void): void {
@@ -102,7 +128,10 @@ export class RealSource implements SessionSource {
     /* no artifacts from the real reader in v1 */
   }
   currentSessions(): Session[] {
-    return readClaudeSessions(this.baseDir, this.machineId);
+    return readClaudeSessions(this.baseDir, this.machineId, {
+      activeWithinMs: this.activeWithinMs,
+      limit: this.limit,
+    });
   }
   resolvePrompt(_promptId: string, _approve: boolean): void {
     /* nothing to resolve — read-only */

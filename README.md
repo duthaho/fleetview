@@ -85,7 +85,27 @@ unblocks and a diff artifact renders. It prints each step as it verifies it.
 - **`real`** — a best-effort, **read-only** reader of your local Claude Code
   transcripts under `~/.claude/projects/…`, exposing session id, cwd, model, and
   a heuristic running/done status. If the layout is missing or odd, it degrades
-  to "no sessions" rather than crashing.
+  to "no sessions" rather than crashing. A fleet console shows the *live* fleet,
+  so it surfaces only sessions touched in the last day, newest first, capped to
+  50 — not the entire months-deep transcript archive.
+
+## Deploy: a public dashboard over Cloudflare Tunnel
+
+The server is a plain Node process, so any reverse proxy / tunnel puts it on the
+public internet with no code change. With [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/):
+
+```bash
+FLEETVIEW_TOKEN=secret node dist/server/main.js         # localhost:4300
+cloudflared tunnel --url http://127.0.0.1:4300          # → https://<name>.trycloudflare.com
+FLEETVIEW_TOKEN=secret node dist/node/main.js --machine this-box --source real
+```
+
+Open the printed `https://…trycloudflare.com` URL from anywhere — the browser
+loads the dashboard and its WebSocket rides the same tunnel. The same-origin
+guard passes because the tunnel preserves the `Host` header (browser `Origin` ==
+`Host`); node clients send no `Origin` and are gated by the token. For a stable
+hostname that survives restarts, use a **named** tunnel + a service manager
+instead of the quick tunnel above.
 
 ## Security
 

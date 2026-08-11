@@ -86,3 +86,35 @@ describe("real reader — future mtime guard (review fix)", () => {
     expect(s!.status).toBe("done");
   });
 });
+
+describe("readClaudeSessions — recency filter (deploy feedback: 711→recent)", () => {
+  it("with activeWithinMs, excludes sessions older than the window", () => {
+    const base = makeClaudeDir();
+    const fresh = writeSession(base, "-p", "fresh.jsonl", [{ type: "user", sessionId: "fresh", cwd: "/p" }]);
+    const stale = writeSession(base, "-p", "stale.jsonl", [{ type: "user", sessionId: "stale", cwd: "/p" }]);
+    const old = new Date(Date.now() - 48 * 3600_000); // 2 days ago
+    utimesSync(stale, old, old);
+    const ids = readClaudeSessions(base, "m", { activeWithinMs: 24 * 3600_000 }).map((s) => s.id);
+    expect(ids).toContain("fresh");
+    expect(ids).not.toContain("stale");
+  });
+
+  it("with limit, keeps only the most-recently-touched N, newest first", () => {
+    const base = makeClaudeDir();
+    const now = Date.now();
+    for (let i = 0; i < 5; i++) {
+      const p = writeSession(base, "-p", `s${i}.jsonl`, [{ type: "user", sessionId: `s${i}`, cwd: "/p" }]);
+      const t = new Date(now - i * 1000); // s0 newest, s4 oldest
+      utimesSync(p, t, t);
+    }
+    const ids = readClaudeSessions(base, "m", { limit: 3 }).map((s) => s.id);
+    expect(ids).toEqual(["s0", "s1", "s2"]);
+  });
+
+  it("with no opts, still returns everything (faithful reader unchanged)", () => {
+    const base = makeClaudeDir();
+    writeSession(base, "-p", "a.jsonl", [{ type: "user", sessionId: "a", cwd: "/p" }]);
+    writeSession(base, "-p", "b.jsonl", [{ type: "user", sessionId: "b", cwd: "/p" }]);
+    expect(readClaudeSessions(base, "m").map((s) => s.id).sort()).toEqual(["a", "b"]);
+  });
+});
