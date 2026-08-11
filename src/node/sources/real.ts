@@ -5,7 +5,7 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { Session, SessionStatus } from "../../protocol.js";
+import type { Session, SessionEvent, SessionStatus } from "../../protocol.js";
 import type { SessionSource, SourceArtifact, SourcePrompt } from "../source.js";
 
 // A transcript touched within this window is treated as a live session.
@@ -148,6 +148,88 @@ function usageTokens(rec: Record<string, unknown>): number {
 function costOf(rec: Record<string, unknown>): number {
   const c = rec.costUSD ?? rec.total_cost_usd;
   return typeof c === "number" ? c : 0;
+}
+
+// Detail tail bounds (D3): the last 10 events, text snippets capped at 120 chars.
+const DETAIL_MAX_EVENTS = 10;
+const SNIPPET_MAX = 120;
+/** A session id that is safe to use as a bare file name (no path traversal). */
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+
+/** Text/tool events, in record order, from one assistant record's content. */
+function eventsOf(rec: Record<string, unknown>): SessionEvent[] {
+  const msg = rec.message;
+  if (!msg || typeof msg !== "object") return [];
+  const content = (msg as { content?: unknown }).content;
+  if (!Array.isArray(content)) return [];
+  const out: SessionEvent[] = [];
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as { type?: unknown; text?: unknown; name?: unknown };
+    if (b.type === "text" && typeof b.text === "string") {
+      out.push({ kind: "text", text: b.text.slice(0, SNIPPET_MAX) });
+    } else if (b.type === "tool_use" && typeof b.name === "string") {
+      out.push({ kind: "tool", text: b.name });
+    }
+  }
+  return out;
+}
+
+/**
+ * On-demand detail tail (D3/D8): the last ≤10 text/tool events of ONE session's
+ * transcript, oldest→newest. Never throws. A path-like id is rejected up front
+ * with NO filesystem access, and reads stay confined to `baseDir/projects`.
+ */
+export function getSessionDetail(baseDir: string, sessionId: string): SessionEvent[] {
+  // Traversal guard (codex): reject anything that isn't a bare id — before any I/O.
+  if (!SAFE_ID.test(sessionId)) return [];
+  const projectsDir = join(baseDir, "projects");
+  const named = `${sessionId}.jsonl`;
+  for (const slug of safeReaddir(projectsDir)) {
+    const projDir = join(projectsDir, slug);
+    let entries: string[];
+    try {
+      if (!statSync(projDir).isDirectory()) continue;
+      entries = readdirSync(projDir);
+    } catch {
+      continue;
+    }
+    // Prefer the <id>.jsonl file, then fall back to scanning for the id inside.
+    const ordered = entries.includes(named) ? [named, ...entries.filter((e) => e !== named)] : entries;
+    for (const file of ordered) {
+      if (!file.endsWith(".jsonl")) continue;
+      const events = detailFromFile(join(projDir, file), file, sessionId);
+      if (events) return events;
+    }
+  }
+  return [];
+}
+
+/** Read one transcript's tail if it belongs to `sessionId`, else null. */
+function detailFromFile(path: string, file: string, sessionId: string): SessionEvent[] | null {
+  let text: string;
+  try {
+    text = readFileSync(path, "utf8");
+  } catch {
+    return null;
+  }
+  const nameMatches = file === `${sessionId}.jsonl`;
+  let belongs = nameMatches;
+  const events: SessionEvent[] = [];
+  for (const line of text.split("\n")) {
+    if (line.trim() === "") continue;
+    let rec: Record<string, unknown>;
+    try {
+      rec = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue; // skip malformed/truncated lines
+    }
+    if (typeof rec.sessionId === "string" && rec.sessionId === sessionId) belongs = true;
+    else if (typeof rec.sessionId === "string" && rec.sessionId && !nameMatches) return null; // a different session's file
+    events.push(...eventsOf(rec));
+  }
+  if (!belongs) return null;
+  return events.slice(-DETAIL_MAX_EVENTS);
 }
 
 // A fleet console shows the live/recent fleet, not a months-deep archive:
