@@ -98,3 +98,55 @@ describe("parseUnifiedDiff — hunk-aware classification (review fix)", () => {
     expect(rows[4]!.kind).toBe("del");
   });
 });
+
+describe("renderSessionDetail — activity events (session-activity feature)", () => {
+  const base = { id: "s1", machineId: "m", cwd: "/repo", model: "opus", status: "running" as const };
+
+  it("renders an activity header + recent events, all escaped", async () => {
+    const { renderSessionDetail } = await import("./diff.js");
+    const session = { ...base, lastTool: "Bash", messages: 4, tokens: 120, costUsd: 0.02 };
+    const events = [
+      { kind: "text" as const, text: "building the thing <ok>" },
+      { kind: "tool" as const, text: "Bash" },
+    ];
+    const html = renderSessionDetail(session, null, events);
+    expect(html).toContain("Bash");
+    expect(html).toMatch(/120|tokens/);
+    expect(html).toContain("building the thing &lt;ok&gt;"); // escaped
+  });
+
+  it("escapes a hostile event text (no injection)", async () => {
+    const { renderSessionDetail } = await import("./diff.js");
+    const events = [{ kind: "text" as const, text: `<script>alert(1)</script>` }];
+    const html = renderSessionDetail(base, null, events);
+    expect(html).not.toContain("<script>alert");
+  });
+
+  it("renders safely when an event kind is unexpected", async () => {
+    const { renderSessionDetail } = await import("./diff.js");
+    const events = [{ kind: "weird" as unknown as "text", text: "x" }];
+    expect(() => renderSessionDetail(base, null, events)).not.toThrow();
+  });
+
+  it("falls back to diff/empty when no events passed (unchanged behavior)", async () => {
+    const { renderSessionDetail } = await import("./diff.js");
+    expect(renderSessionDetail(base, null)).toContain("no diff evidence yet");
+  });
+});
+
+describe("activitySummary — last-active (review fix D1/D7)", () => {
+  it("renders a relative last-active + escapes it", async () => {
+    const { activitySummary } = await import("./diff.js");
+    const now = Date.parse("2026-08-11T00:05:00Z");
+    const s = { id: "s", machineId: "m", cwd: "/", model: "o", status: "running" as const,
+      lastActivity: "2026-08-11T00:00:00Z", lastTool: "Bash", tokens: 10 };
+    const out = activitySummary(s, now);
+    expect(out).toMatch(/5m|5 min|ago/); // 5 minutes ago
+    expect(out).toContain("Bash");
+  });
+  it("omits last-active when absent", async () => {
+    const { activitySummary } = await import("./diff.js");
+    const s = { id: "s", machineId: "m", cwd: "/", model: "o", status: "done" as const, tokens: 5 };
+    expect(activitySummary(s, Date.now())).toContain("5 tok");
+  });
+});

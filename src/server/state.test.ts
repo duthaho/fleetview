@@ -53,6 +53,15 @@ describe("FleetState", () => {
     expect(s.listPrompts()).toEqual([]);
   });
 
+  it("machineForSession returns the owning machine, undefined for an unknown id (T5)", () => {
+    const s = new FleetState();
+    s.upsertSessions("alpha", [sess("a1", "alpha"), sess("a2", "alpha")]);
+    s.upsertSessions("beta", [sess("b1", "beta")]);
+    expect(s.machineForSession("a2")).toBe("alpha");
+    expect(s.machineForSession("b1")).toBe("beta");
+    expect(s.machineForSession("ghost")).toBeUndefined();
+  });
+
   it("tracks the latest artifact per session (for T8/T11)", () => {
     const s = new FleetState();
     s.upsertSessions("alpha", [sess("a1", "alpha")]);

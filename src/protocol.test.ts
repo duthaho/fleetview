@@ -45,3 +45,33 @@ describe("parseMessage — rejects malformed", () => {
     });
   }
 });
+
+describe("protocol — session activity round-trip (session-activity feature)", () => {
+  it("round-trips requestDetail and sessionDetail with typed events", async () => {
+    const { parseMessage } = await import("./protocol.js");
+    const req = { t: "requestDetail", sessionId: "s1" };
+    expect(parseMessage(JSON.stringify(req))).toEqual(req);
+    const det = { t: "sessionDetail", sessionId: "s1", events: [{ kind: "text", text: "hi" }, { kind: "tool", text: "Bash" }] };
+    expect(parseMessage(JSON.stringify(det))).toEqual(det);
+  });
+
+  it("accepts a Session carrying optional activity fields", async () => {
+    const { parseMessage } = await import("./protocol.js");
+    const s = { id: "s1", machineId: "m", cwd: "/c", model: "opus", status: "running", lastActivity: "2026-08-11T00:00:00Z", lastTool: "Bash", messages: 4, tokens: 120, costUsd: 0.02 };
+    const msg = parseMessage(JSON.stringify({ t: "sessions", sessions: [s] }));
+    expect(msg).not.toBeNull();
+    expect((msg as { sessions: { tokens?: number }[] }).sessions[0].tokens).toBe(120);
+  });
+
+  it("rejects malformed detail messages", async () => {
+    const { parseMessage } = await import("./protocol.js");
+    for (const bad of [
+      '{"t":"requestDetail"}',                                   // no sessionId
+      '{"t":"sessionDetail","sessionId":"s1","events":"nope"}',  // events not array
+      '{"t":"sessionDetail","sessionId":"s1","events":[{"kind":"bad","text":"x"}]}', // bad kind
+      '{"t":"sessionDetail","sessionId":"s1","events":[{"kind":"text","text":5}]}',  // text not string
+    ]) {
+      expect(parseMessage(bad), bad).toBeNull();
+    }
+  });
+});

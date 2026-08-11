@@ -2,7 +2,7 @@
 // the server (D2). Two v1 implementations: simulated (deterministic, drives the
 // demo + tests) and real (best-effort reader of ~/.claude). The node (T7)
 // subscribes to the callbacks and applies inbound decisions via resolvePrompt.
-import type { PendingPrompt, Session } from "../protocol.js";
+import type { PendingPrompt, Session, SessionEvent } from "../protocol.js";
 
 export interface SourcePrompt {
   promptId: string;
@@ -29,6 +29,11 @@ export interface SessionSource {
   resolvePrompt(promptId: string, approve: boolean): void;
   /** Begin producing sessions (idempotent; real sources start reading). */
   start(): void;
+  /**
+   * On-demand recent-activity tail for one session (D4). Optional: only the real
+   * source implements it; when absent the node replies with an empty tail.
+   */
+  getDetail?(sessionId: string): Promise<SessionEvent[]>;
 }
 
 /** Shared shape the node uses when turning a SourcePrompt into wire state. */

@@ -3,7 +3,7 @@
 // +/- coloring classes. EVERY diff line is html-escaped: a diff line containing
 // <script> must not inject markup (tested). Shares the terminal theme via the
 // diff-* classes defined in render.ts's inlined CSS.
-import type { Session, SessionStatus } from "../protocol.js";
+import type { Session, SessionEvent, SessionStatus } from "../protocol.js";
 import { escapeHtml } from "./render.js";
 
 export type DiffKind = "add" | "del" | "hunk" | "context" | "meta";
@@ -54,13 +54,57 @@ function renderRow(row: DiffRow): string {
   return `<div class="diff-row diff-${row.kind}">${escapeHtml(row.text)}</div>`;
 }
 
-/** The session-detail panel: header + the inline unified diff (or empty-state). */
-export function renderSessionDetail(session: Session, diffText: string | null): string {
+/** A short relative age like "just now" / "5m" / "3h" / "2d" from an ISO ts. */
+function relativeTime(iso: string, now: number): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
+/** Compact activity summary for a session (header line / fleet row). */
+export function activitySummary(s: Session, now: number = Date.now()): string {
+  const bits: string[] = [];
+  if (s.lastActivity) {
+    const rel = relativeTime(s.lastActivity, now);
+    if (rel) bits.push(escapeHtml(rel));
+  }
+  if (s.lastTool) bits.push(`▸ ${escapeHtml(s.lastTool)}`);
+  if (typeof s.messages === "number" && s.messages > 0) bits.push(`${s.messages} msg`);
+  if (typeof s.tokens === "number" && s.tokens > 0) bits.push(`${s.tokens.toLocaleString("en-US")} tok`);
+  if (typeof s.costUsd === "number" && s.costUsd > 0) bits.push(`$${s.costUsd.toFixed(2)}`);
+  return bits.join(" · ");
+}
+
+function renderEvent(e: SessionEvent): string {
+  const kind = e.kind === "tool" ? "tool" : "text"; // unknown kind → text (safe)
+  const label = kind === "tool" ? `▸ ${escapeHtml(e.text)}` : escapeHtml(e.text);
+  return `<div class="event event-${kind}">${label}</div>`;
+}
+
+/**
+ * The session-detail panel: header + activity (recent events when supplied,
+ * else the inline unified diff, else empty). Every field is html-escaped.
+ */
+export function renderSessionDetail(
+  session: Session,
+  diffText: string | null,
+  events?: SessionEvent[],
+): string {
+  const summary = activitySummary(session);
   const head = `<header class="detail-head">
     <span class="detail-id">${escapeHtml(session.id)}</span>
     <span class="detail-meta">${escapeHtml(session.model)} · ${escapeHtml(session.cwd)}</span>
     <span class="detail-status status-label-${session.status}">${escapeHtml(STATUS_LABEL[session.status])}</span>
+    ${summary ? `<span class="detail-activity">${summary}</span>` : ""}
   </header>`;
+  if (events && events.length > 0) {
+    const rows = events.map(renderEvent).join("\n");
+    return `<div class="session-detail">${head}<div class="detail-events">${rows}</div></div>`;
+  }
   if (!diffText) {
     return `<div class="session-detail">${head}<p class="empty">no diff evidence yet</p></div>`;
   }

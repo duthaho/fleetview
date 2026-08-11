@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { FleetNode } from "./node.js";
 import { SimulatedSource } from "./sources/simulated.js";
-import { parseMessage, encode, type WireMessage } from "../protocol.js";
+import { parseMessage, encode, type SessionEvent, type WireMessage } from "../protocol.js";
+import type { SessionSource } from "./source.js";
 
 // A fake ws connection: captures outbound frames, lets the test push inbound.
 function fakeConn() {
@@ -73,6 +74,58 @@ describe("FleetNode", () => {
     if (artifact?.t === "artifact") expect(artifact.diff).toContain("+++ ");
     const last = sent.filter((m) => m.t === "sessions").at(-1);
     if (last?.t === "sessions") expect(last.sessions[0].status).toBe("done");
+  });
+
+  it("answers an inbound requestDetail with the source's getDetail events (T6)", async () => {
+    const { conn, sent, inbound } = fakeConn();
+    const events: SessionEvent[] = [
+      { kind: "text", text: "hi" },
+      { kind: "tool", text: "Bash" },
+    ];
+    const source = {
+      onSessions() {},
+      onPrompt() {},
+      onArtifact() {},
+      currentSessions: () => [],
+      resolvePrompt() {},
+      start() {},
+      getDetail: async (id: string) => (id === "s1" ? events : []),
+    } as unknown as SessionSource;
+    new FleetNode({ machineId: "alpha", token: "secret", conn, source }).start();
+    inbound({ t: "requestDetail", sessionId: "s1" });
+    await new Promise((r) => setTimeout(r, 10));
+    const detail = sent.find((m) => m.t === "sessionDetail");
+    expect(detail).toEqual({ t: "sessionDetail", sessionId: "s1", events });
+  });
+
+  it("a source WITHOUT getDetail replies with an empty tail (T6)", async () => {
+    const { conn, sent, inbound } = fakeConn();
+    const source = new SimulatedSource("alpha", "sim-1"); // no getDetail
+    new FleetNode({ machineId: "alpha", token: "secret", conn, source }).start();
+    inbound({ t: "requestDetail", sessionId: "sim-1" });
+    await new Promise((r) => setTimeout(r, 10));
+    const detail = sent.find((m) => m.t === "sessionDetail");
+    expect(detail).toEqual({ t: "sessionDetail", sessionId: "sim-1", events: [] });
+  });
+
+  it("a getDetail that throws → empty events, node does not crash (T6)", async () => {
+    const { conn, sent, inbound } = fakeConn();
+    const source = {
+      onSessions() {},
+      onPrompt() {},
+      onArtifact() {},
+      currentSessions: () => [],
+      resolvePrompt() {},
+      start() {},
+      getDetail: async () => {
+        throw new Error("boom");
+      },
+    } as unknown as SessionSource;
+    new FleetNode({ machineId: "alpha", token: "secret", conn, source }).start();
+    inbound({ t: "requestDetail", sessionId: "s1" });
+    await new Promise((r) => setTimeout(r, 10));
+    const detail = sent.find((m) => m.t === "sessionDetail");
+    expect(detail).toEqual({ t: "sessionDetail", sessionId: "s1", events: [] });
   });
 
   it("deny → session aborts, no artifact", () => {
