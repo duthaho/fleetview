@@ -6,35 +6,44 @@ import { WebSocket } from "ws";
 import { FleetNode, type NodeConn } from "./node.js";
 import { SimulatedSource } from "./sources/simulated.js";
 import { RealSource } from "./sources/real.js";
+import { AgentkitSource } from "./sources/agentkit.js";
 import type { SessionSource } from "./source.js";
 
 interface Args {
   machineId: string;
-  sourceKind: "simulated" | "real";
+  sourceKind: "simulated" | "real" | "agentkit";
   serverUrl: string;
   token: string;
+  /** Unix-socket path for the agentkit escalation bridge (--source agentkit). */
+  bridgePath?: string;
 }
 
 export function parseArgs(argv: string[]): Args {
   let machineId = "local";
-  let sourceKind: "simulated" | "real" = "simulated";
+  let sourceKind: "simulated" | "real" | "agentkit" = "simulated";
+  let bridgePath: string | undefined;
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--machine") machineId = argv[++i] ?? machineId;
     else if (argv[i] === "--source") {
       const v = argv[++i];
-      if (v === "simulated" || v === "real") sourceKind = v;
-    }
+      if (v === "simulated" || v === "real" || v === "agentkit") sourceKind = v;
+    } else if (argv[i] === "--bridge") bridgePath = argv[++i] ?? bridgePath;
   }
   return {
     machineId,
     sourceKind,
     serverUrl: process.env.FLEETVIEW_SERVER ?? "ws://127.0.0.1:4300",
     token: process.env.FLEETVIEW_TOKEN ?? "",
+    bridgePath,
   };
 }
 
 function makeSource(args: Args): SessionSource {
   if (args.sourceKind === "real") return new RealSource(args.machineId);
+  if (args.sourceKind === "agentkit") {
+    const path = args.bridgePath ?? process.env.AGENTKIT_ESC_BRIDGE ?? "/tmp/agentkit-esc.sock";
+    return new AgentkitSource(args.machineId, path);
+  }
   return new SimulatedSource(args.machineId, `${args.machineId}-sim`);
 }
 
