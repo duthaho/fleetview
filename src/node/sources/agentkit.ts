@@ -61,6 +61,7 @@ export class AgentkitSource implements SessionSource {
   private readonly connectFn: ConnectFn;
   private sessionsCbs: ((sessions: Session[]) => void)[] = [];
   private promptCbs: ((p: SourcePrompt) => void)[] = [];
+  private promptResolvedCbs: ((promptId: string, approve: boolean) => void)[] = [];
   private tracked = new Map<string, Tracked>();
   private sock: Socket | null = null;
   private buf = "";
@@ -84,6 +85,9 @@ export class AgentkitSource implements SessionSource {
   }
   onArtifact(_cb: (a: SourceArtifact) => void): void {
     /* read-gating source raises no artifacts (D4) */
+  }
+  onPromptResolved(cb: (promptId: string, approve: boolean) => void): void {
+    this.promptResolvedCbs.push(cb);
   }
 
   currentSessions(): Session[] {
@@ -164,7 +168,7 @@ export class AgentkitSource implements SessionSource {
     }
     if (typeof msg.t !== "string" || typeof msg.token !== "string") return;
     if (msg.t === "escalation") this.onEscalation(msg);
-    else if (msg.t === "resolved") this.onResolved(msg.token);
+    else if (msg.t === "resolved") this.onResolved(msg.token, msg.allow === true);
   }
 
   private onEscalation(msg: Record<string, unknown>): void {
@@ -183,8 +187,12 @@ export class AgentkitSource implements SessionSource {
     for (const cb of this.promptCbs) cb(prompt);
   }
 
-  private onResolved(token: string): void {
-    if (this.tracked.delete(token)) this.emitSessions();
+  private onResolved(token: string, approve: boolean): void {
+    const had = this.tracked.delete(token);
+    // Always signal an external resolution so the node clears the inbox prompt,
+    // even if we'd already dropped the session (idempotent on the hub side).
+    for (const cb of this.promptResolvedCbs) cb(token, approve);
+    if (had) this.emitSessions();
   }
 
   private toSession(t: Tracked): Session {

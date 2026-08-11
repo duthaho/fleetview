@@ -23,6 +23,11 @@ export interface SessionSource {
   onPrompt(cb: (prompt: SourcePrompt) => void): void;
   /** Notified when a session produces an artifact (unified diff, v1). */
   onArtifact(cb: (artifact: SourceArtifact) => void): void;
+  /** Optional: notified when a prompt is resolved EXTERNALLY (not via this
+   *  dashboard) — e.g. a Telegram tap or an aborted turn on the agentkit
+   *  bridge — so the node can clear it from the inbox. Sources with no external
+   *  resolution path may omit it. */
+  onPromptResolved?(cb: (promptId: string, approve: boolean) => void): void;
   /** Current sessions right now (for the initial hello/announce). */
   currentSessions(): Session[];
   /** Apply a remote decision to a pending prompt. */

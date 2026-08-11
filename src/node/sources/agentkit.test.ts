@@ -188,3 +188,17 @@ describe("AgentkitSource over a real Unix socket bridge", () => {
     expect(seen.prompts[0].promptId).toBe("1");
   });
 });
+
+describe("AgentkitSource — external resolution clears the prompt (review HIGH fix)", () => {
+  it("fires onPromptResolved when the bridge broadcasts a resolved frame", async () => {
+    const { bridge, source, seen } = await setup();
+    const resolved: Array<{ token: string; approve: boolean }> = [];
+    source.onPromptResolved((token, approve) => resolved.push({ token, approve }));
+    bridge.send({ t: "escalation", token: "tk1", toolName: "Bash", input: { command: "x" }, cwd: "/c", sessionId: "s1" });
+    await waitFor(() => seen.prompts.some((p) => p.promptId === "tk1"));
+    // external resolution (e.g. a Telegram tap), NOT via the dashboard
+    bridge.send({ t: "resolved", token: "tk1", allow: false });
+    await waitFor(() => resolved.length === 1);
+    expect(resolved[0]).toEqual({ token: "tk1", approve: false });
+  });
+});

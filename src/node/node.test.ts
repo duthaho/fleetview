@@ -89,3 +89,21 @@ describe("FleetNode", () => {
     if (last?.t === "sessions") expect(last.sessions[0].status).toBe("aborted");
   });
 });
+
+describe("FleetNode — external prompt resolution (review HIGH fix)", () => {
+  it("forwards source.onPromptResolved as a promptResolved frame", () => {
+    const { conn, sent } = fakeConn();
+    // Minimal source exposing the optional onPromptResolved seam.
+    let fire: ((promptId: string, approve: boolean) => void) | undefined;
+    const source = {
+      onSessions() {}, onPrompt() {}, onArtifact() {},
+      onPromptResolved(cb: (p: string, a: boolean) => void) { fire = cb; },
+      currentSessions() { return []; },
+      resolvePrompt() {}, start() {},
+    };
+    new FleetNode({ machineId: "alpha", token: "secret", conn, source }).start();
+    fire!("tok-9", false);
+    const pr = sent.find((m) => m.t === "promptResolved");
+    expect(pr).toEqual({ t: "promptResolved", promptId: "tok-9", approve: false });
+  });
+});
