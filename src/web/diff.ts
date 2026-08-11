@@ -54,9 +54,24 @@ function renderRow(row: DiffRow): string {
   return `<div class="diff-row diff-${row.kind}">${escapeHtml(row.text)}</div>`;
 }
 
+/** A short relative age like "just now" / "5m" / "3h" / "2d" from an ISO ts. */
+function relativeTime(iso: string, now: number): string {
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "";
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  return `${Math.round(s / 86400)}d ago`;
+}
+
 /** Compact activity summary for a session (header line / fleet row). */
-export function activitySummary(s: Session): string {
+export function activitySummary(s: Session, now: number = Date.now()): string {
   const bits: string[] = [];
+  if (s.lastActivity) {
+    const rel = relativeTime(s.lastActivity, now);
+    if (rel) bits.push(escapeHtml(rel));
+  }
   if (s.lastTool) bits.push(`▸ ${escapeHtml(s.lastTool)}`);
   if (typeof s.messages === "number" && s.messages > 0) bits.push(`${s.messages} msg`);
   if (typeof s.tokens === "number" && s.tokens > 0) bits.push(`${s.tokens.toLocaleString("en-US")} tok`);

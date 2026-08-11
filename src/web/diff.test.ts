@@ -133,3 +133,20 @@ describe("renderSessionDetail — activity events (session-activity feature)", (
     expect(renderSessionDetail(base, null)).toContain("no diff evidence yet");
   });
 });
+
+describe("activitySummary — last-active (review fix D1/D7)", () => {
+  it("renders a relative last-active + escapes it", async () => {
+    const { activitySummary } = await import("./diff.js");
+    const now = Date.parse("2026-08-11T00:05:00Z");
+    const s = { id: "s", machineId: "m", cwd: "/", model: "o", status: "running" as const,
+      lastActivity: "2026-08-11T00:00:00Z", lastTool: "Bash", tokens: 10 };
+    const out = activitySummary(s, now);
+    expect(out).toMatch(/5m|5 min|ago/); // 5 minutes ago
+    expect(out).toContain("Bash");
+  });
+  it("omits last-active when absent", async () => {
+    const { activitySummary } = await import("./diff.js");
+    const s = { id: "s", machineId: "m", cwd: "/", model: "o", status: "done" as const, tokens: 5 };
+    expect(activitySummary(s, Date.now())).toContain("5 tok");
+  });
+});

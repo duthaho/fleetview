@@ -262,6 +262,22 @@ describe("Hub — cross-origin browser is rejected (CSWSH guard)", () => {
   });
 });
 
+describe("Hub — requestDetail leak guard (review fix)", () => {
+  let hub: Hub; let url: string;
+  beforeEach(async () => { hub = new Hub({ token: TOKEN }); const port = await hub.listen(0); url = `ws://127.0.0.1:${port}`; });
+  afterEach(async () => { await hub.close(); });
+  it("creates no stuck pendingDetail entry for an unknown/offline session", async () => {
+    const browser = await open(url);
+    browser.send(encode({ t: "hello", role: "browser", token: TOKEN }));
+    await next(browser); // snapshot
+    browser.send(encode({ t: "requestDetail", sessionId: "ghost" }));
+    await new Promise((r) => setTimeout(r, 100));
+    // @ts-expect-error private map probe
+    expect(hub.pendingDetail.size).toBe(0);
+    browser.close();
+  });
+});
+
 describe("Hub — review fixes", () => {
   let hub: Hub;
   let url: string;
