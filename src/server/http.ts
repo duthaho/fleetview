@@ -9,9 +9,9 @@ import { dirname, join } from "node:path";
 import { renderShell } from "../web/render.js";
 import { Hub } from "./hub.js";
 
-// dist/server/http.js → dist/web/client.js (both under dist/ after tsc build).
+// dist/server/http.js → dist/web/ (both under dist/ after tsc build).
 const HERE = dirname(fileURLToPath(import.meta.url));
-const CLIENT_JS_PATH = join(HERE, "..", "web", "client.js");
+const WEB_DIR = join(HERE, "..", "web");
 
 export interface DashboardOptions {
   token: string;
@@ -19,6 +19,9 @@ export interface DashboardOptions {
   /** Bind address. Default 127.0.0.1 (safe); set to 0.0.0.0 to expose the
    * fleet server to remote nodes — do so behind a firewall (network-exposure). */
   host?: string;
+  /** Dir the browser-ESM modules are served from. Defaults to the built
+   * dist/web next to this file; overridable for tests. */
+  webDir?: string;
 }
 
 export interface Dashboard {
@@ -29,7 +32,7 @@ export interface Dashboard {
 }
 
 /** Build (but don't start) the http server + attached hub. */
-export function createDashboard(token: string): { server: Server; hub: Hub } {
+export function createDashboard(token: string, webDir: string = WEB_DIR): { server: Server; hub: Hub } {
   const shell = renderShell();
   const hub = new Hub({ token });
 
@@ -40,15 +43,24 @@ export function createDashboard(token: string): { server: Server; hub: Hub } {
       res.end(shell);
       return;
     }
-    if (url === "/client.js") {
-      readFile(CLIENT_JS_PATH)
+    // Serve any browser-ESM module from dist/web. The client is unbundled, so
+    // client.js imports ./render.js and ./diff.js — all must be reachable, not
+    // just /client.js. Basename-only lookup (no subpaths) blocks path traversal.
+    if (url === "/favicon.ico") {
+      res.writeHead(204); // no favicon; answer cleanly so the console stays quiet
+      res.end();
+      return;
+    }
+    const jsMatch = /^\/([a-z0-9_-]+\.js)$/i.exec(url);
+    if (jsMatch) {
+      readFile(join(webDir, jsMatch[1]!))
         .then((buf) => {
           res.writeHead(200, { "content-type": "text/javascript; charset=utf-8" });
           res.end(buf);
         })
         .catch(() => {
           res.writeHead(404, { "content-type": "text/plain" });
-          res.end("client.js not built — run `npm run build`");
+          res.end(`${jsMatch[1]} not built — run \`npm run build\``);
         });
       return;
     }
@@ -62,7 +74,7 @@ export function createDashboard(token: string): { server: Server; hub: Hub } {
 
 /** Start the dashboard (http + ws hub) and resolve once listening. */
 export function startDashboard(opts: DashboardOptions): Promise<Dashboard> {
-  const { server, hub } = createDashboard(opts.token);
+  const { server, hub } = createDashboard(opts.token, opts.webDir);
   const port = opts.port ?? 4300;
   const host = opts.host ?? "127.0.0.1";
   return new Promise((resolve, reject) => {
