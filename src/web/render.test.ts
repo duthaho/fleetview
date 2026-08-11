@@ -118,3 +118,16 @@ describe("renderShell", () => {
     expect(html).toContain("<!doctype html>");
   });
 });
+
+describe("renderFleet — row activity line (session-activity feature)", () => {
+  it("shows last-tool + tokens per row and escapes a hostile lastTool", async () => {
+    const { renderFleet } = await import("./render.js");
+    const machines = [{ machineId: "m", sessions: [
+      { id: "s1", machineId: "m", cwd: "/r", model: "opus", status: "running" as const, lastTool: "<img src=x>", tokens: 999 },
+    ]}];
+    const html = renderFleet(machines);
+    expect(html).toContain("999");
+    expect(html).not.toContain("<img src=x>"); // escaped
+    expect(html).toContain("&lt;img src=x&gt;");
+  });
+});

@@ -4,6 +4,7 @@
 // must never inject markup (tested). The shell inlines the terminal theme so the
 // console reads like the sibling vibecheck project (dark phosphor).
 import type { MachineView, PendingPrompt, Session, SessionStatus } from "../protocol.js";
+import { activitySummary } from "./diff.js";
 
 /** Escape the five markup-significant characters. Order matters: & first. */
 export function escapeHtml(s: string): string {
@@ -30,6 +31,7 @@ function renderSession(s: Session): string {
       <span class="session-id">${id}</span>
       <span class="session-meta">${escapeHtml(s.model)} · ${escapeHtml(s.cwd)}</span>
       <span class="session-status">${escapeHtml(STATUS_LABEL[s.status])}</span>
+      ${activitySummary(s) ? `<span class="session-activity">${activitySummary(s)}</span>` : ""}
     </li>`;
 }
 
@@ -176,7 +178,13 @@ body {
 .diff-meta { color: var(--ink-2); background: var(--paper-2); }
 .diff-add { color: var(--accent); }
 .diff-del { color: var(--danger); }
-.diff-context { color: var(--ink-2); }`;
+.diff-context { color: var(--ink-2); }
+.session-activity { grid-column: 2; color: var(--ink-2); font-size: 11px; opacity: 0.85; }
+.detail-activity { display: block; margin-top: 4px; color: var(--ink-2); font-size: 12px; }
+.detail-events { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
+.event { padding: 4px 8px; border-left: 2px solid var(--rule); white-space: pre-wrap; word-break: break-word; font-size: 12px; }
+.event-text { color: var(--ink); }
+.event-tool { color: var(--accent); border-left-color: var(--accent); }`;
 
 /** The server-rendered HTML shell: #app mount + module client + inlined theme. */
 export function renderShell(): string {
