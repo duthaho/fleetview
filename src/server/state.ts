@@ -30,6 +30,14 @@ export class FleetState {
     }));
   }
 
+  /** Which machine owns a session — the hub uses this to route detail requests. */
+  machineForSession(sessionId: string): string | undefined {
+    for (const [machineId, sessions] of this.sessionsByMachine) {
+      if (sessions.some((s) => s.id === sessionId)) return machineId;
+    }
+    return undefined;
+  }
+
   addPrompt(prompt: PendingPrompt): void {
     this.prompts.set(prompt.promptId, prompt);
   }
