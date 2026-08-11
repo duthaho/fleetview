@@ -2,7 +2,7 @@
 // browser hello, and live-renders snapshot/patch frames into #app via the PURE
 // render.ts builders. Browser-only (native WebSocket + DOM) — tsc emits this as
 // loadable ESM; vitest tests only the pure render.ts functions, never this file.
-import type { MachineView, PendingPrompt, ServerToBrowser } from "../protocol.js";
+import type { MachineView, PendingPrompt, ServerToBrowser, SessionEvent } from "../protocol.js";
 import { renderFleet, renderInbox } from "./render.js";
 import { renderSessionDetail } from "./diff.js";
 
@@ -12,10 +12,11 @@ interface View {
   machines: MachineView[];
   prompts: PendingPrompt[];
   artifacts: Map<string, string>;
+  details: Map<string, SessionEvent[]>;
   selected: string | null;
 }
 
-const view: View = { machines: [], prompts: [], artifacts: new Map(), selected: null };
+const view: View = { machines: [], prompts: [], artifacts: new Map(), details: new Map(), selected: null };
 
 function q(sel: string): HTMLElement | null {
   return document.querySelector(sel);
@@ -38,7 +39,7 @@ function paint(): void {
   if (detail) {
     const s = view.selected ? sessionById(view.selected) : null;
     detail.innerHTML = s
-      ? renderSessionDetail(s, view.artifacts.get(s.id) ?? null)
+      ? renderSessionDetail(s, view.artifacts.get(s.id) ?? null, view.details.get(s.id))
       : `<p class="empty">select a session</p>`;
   }
   const sel = view.selected;
@@ -56,6 +57,9 @@ function applyFrame(msg: ServerToBrowser): void {
       if (op.op === "machines") view.machines = op.machines;
       else if (op.op === "prompts") view.prompts = op.prompts;
       else if (op.op === "artifact") view.artifacts.set(op.sessionId, op.diff);
+      // Store detail by sessionId; only the currently-selected id is rendered, so
+      // a late/out-of-order reply for another session is harmless.
+      else if (op.op === "detail") view.details.set(op.sessionId, op.events);
     }
   }
   paint();
@@ -105,6 +109,10 @@ function connect(): void {
     const row = target.closest<HTMLElement>(".session[data-session-id]");
     if (row) {
       view.selected = row.dataset.sessionId ?? null;
+      // Fetch this session's recent-activity tail on demand.
+      if (view.selected && ws.readyState === ws.OPEN) {
+        ws.send(JSON.stringify({ t: "requestDetail", sessionId: view.selected }));
+      }
       paint();
     }
   });
