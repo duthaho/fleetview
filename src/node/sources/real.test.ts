@@ -179,6 +179,22 @@ describe("getSessionDetail (T3, D3/D8)", () => {
     expect(firstText.text.startsWith("3-")).toBe(true); // events 3..11 text + tool = 10
   });
 
+  it("skips empty/whitespace-only text blocks, keeping the meaningful tail (Bug B)", () => {
+    const base = makeClaudeDir();
+    writeSession(base, "-home-me-proj", "sparse.jsonl", [
+      { type: "assistant", sessionId: "sparse", cwd: "/p", message: { model: "m", content: [{ type: "text", text: "real answer" }] } },
+      { type: "assistant", sessionId: "sparse", cwd: "/p", message: { model: "m", content: [{ type: "text", text: "" }] } },
+      { type: "assistant", sessionId: "sparse", cwd: "/p", message: { model: "m", content: [{ type: "text", text: "   \n  " }] } },
+      { type: "assistant", sessionId: "sparse", cwd: "/p", message: { model: "m", content: [{ type: "tool_use", name: "Bash" }] } },
+    ]);
+    // The empty/whitespace text records must NOT appear; the tail is the two
+    // meaningful events, not a trailing [{text:""}].
+    expect(getSessionDetail(base, "sparse")).toEqual([
+      { kind: "text", text: "real answer" },
+      { kind: "tool", text: "Bash" },
+    ]);
+  });
+
   it("locates a session whose file name differs from its id", () => {
     const base = makeClaudeDir();
     writeSession(base, "-p", "some-file.jsonl", [

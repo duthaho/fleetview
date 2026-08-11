@@ -18,6 +18,24 @@ interface View {
 
 const view: View = { machines: [], prompts: [], artifacts: new Map(), details: new Map(), selected: null };
 
+// Project groups render as native <details> with a default-open heuristic, but
+// paint() replaces .fleet-region's innerHTML on every 3s patch — which would
+// discard the user's manual expand/collapse. Remember each group's toggled
+// state by machine+cwd key and re-apply it after every repaint.
+const groupOpen = new Map<string, boolean>();
+
+function restoreGroupState(root: HTMLElement): void {
+  root.querySelectorAll<HTMLDetailsElement>(".project-group[data-group-key]").forEach((el) => {
+    // Namespace by machine so two machines sharing a cwd (or the "" unknown
+    // group) keep independent collapse state. Composite key is JS-only (never
+    // rendered), so a NUL separator is safe and cannot appear in a real path.
+    const machine = el.closest<HTMLElement>(".machine")?.dataset.machineId ?? "";
+    const key = `${machine}\u0000${el.dataset.groupKey ?? ""}`;
+    if (groupOpen.has(key)) el.open = groupOpen.get(key)!;
+    el.addEventListener("toggle", () => groupOpen.set(key, el.open));
+  });
+}
+
 function q(sel: string): HTMLElement | null {
   return document.querySelector(sel);
 }
@@ -32,7 +50,10 @@ function sessionById(id: string) {
 
 function paint(): void {
   const fleet = q(".fleet-region");
-  if (fleet) fleet.innerHTML = renderFleet(view.machines);
+  if (fleet) {
+    fleet.innerHTML = renderFleet(view.machines);
+    restoreGroupState(fleet);
+  }
   const inbox = q(".inbox-region");
   if (inbox) inbox.innerHTML = renderInbox(view.prompts);
   const detail = q(".detail-region");

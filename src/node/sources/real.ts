@@ -167,7 +167,11 @@ function eventsOf(rec: Record<string, unknown>): SessionEvent[] {
     if (!block || typeof block !== "object") continue;
     const b = block as { type?: unknown; text?: unknown; name?: unknown };
     if (b.type === "text" && typeof b.text === "string") {
-      out.push({ kind: "text", text: b.text.slice(0, SNIPPET_MAX) });
+      // Skip empty/whitespace-only assistant text: it's noise that would push
+      // real events out of the ≤10 tail and can leave a done session showing
+      // just [{text:""}] (Bug B).
+      const text = b.text.trim();
+      if (text) out.push({ kind: "text", text: text.slice(0, SNIPPET_MAX) });
     } else if (b.type === "tool_use" && typeof b.name === "string") {
       out.push({ kind: "tool", text: b.name });
     }

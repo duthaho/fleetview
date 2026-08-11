@@ -130,4 +130,57 @@ describe("renderFleet — row activity line (session-activity feature)", () => {
     expect(html).not.toContain("<img src=x>"); // escaped
     expect(html).toContain("&lt;img src=x&gt;");
   });
+
+  it("places the activity line on its own grid row so it can't collide with meta (Bug A)", async () => {
+    const { renderFleet, THEME_CSS_FOR_TEST } = await import("./render.js");
+    const machines = [{ machineId: "m", sessions: [
+      { id: "s1", machineId: "m", cwd: "/r", model: "opus", status: "running" as const, lastTool: "Bash", tokens: 10 },
+    ]}];
+    expect(renderFleet(machines)).toContain("session-activity");
+    // Bug A was meta and activity both `grid-column: 2` in the same auto row.
+    expect(THEME_CSS_FOR_TEST).not.toMatch(/\.session-meta\s*\{[^}]*grid-column:\s*2;[^}]*\}[\s\S]*\.session-activity\s*\{[^}]*grid-column:\s*2;/);
+    // Activity now carries an explicit grid-row so it stacks below meta.
+    expect(THEME_CSS_FOR_TEST).toMatch(/\.session-activity\s*\{[^}]*grid-row:/);
+  });
+});
+
+describe("renderFleet — grouped by project/cwd (session-grouping feature)", () => {
+  it("groups a machine's sessions by cwd into collapsible project groups with counts", async () => {
+    const { renderFleet } = await import("./render.js");
+    const machines = [{ machineId: "m", sessions: [
+      { id: "s1", machineId: "m", cwd: "/home/me/showcase/fleetview", model: "opus", status: "running" as const },
+      { id: "s2", machineId: "m", cwd: "/home/me/showcase/fleetview", model: "opus", status: "done" as const },
+      { id: "s3", machineId: "m", cwd: "/home/me/agentkit", model: "opus", status: "done" as const },
+    ]}];
+    const html = renderFleet(machines);
+    expect(html).toContain("project-group");
+    expect(html).toContain("<details");
+    expect(html).toContain("<summary");
+    expect(html).toContain("fleetview");
+    expect(html).toContain("agentkit");
+    expect(html).toMatch(/data-group-key="\/home\/me\/showcase\/fleetview"[\s\S]*?project-count">2</);
+    for (const id of ["s1", "s2", "s3"]) expect(html).toContain(id);
+  });
+
+  it("opens a group with an active session and collapses an all-done group", async () => {
+    const { renderFleet } = await import("./render.js");
+    const machines = [{ machineId: "m", sessions: [
+      { id: "a", machineId: "m", cwd: "/proj/live", model: "opus", status: "running" as const },
+      { id: "b", machineId: "m", cwd: "/proj/idle", model: "opus", status: "done" as const },
+    ]}];
+    const html = renderFleet(machines);
+    expect(html).toMatch(/<details class="project-group" data-group-key="\/proj\/live" open>/);
+    expect(html).toMatch(/<details class="project-group" data-group-key="\/proj\/idle">/);
+  });
+
+  it("labels an empty cwd group 'unknown' and escapes a hostile cwd", async () => {
+    const { renderFleet } = await import("./render.js");
+    const machines = [{ machineId: "m", sessions: [
+      { id: "x", machineId: "m", cwd: "", model: "opus", status: "done" as const },
+      { id: "y", machineId: "m", cwd: `"><img src=x>`, model: "opus", status: "done" as const },
+    ]}];
+    const html = renderFleet(machines);
+    expect(html).toContain("unknown");
+    expect(html).not.toContain(`"><img src=x>`);
+  });
 });

@@ -35,12 +35,66 @@ function renderSession(s: Session): string {
     </li>`;
 }
 
+const ACTIVE: ReadonlySet<SessionStatus> = new Set<SessionStatus>(["starting", "running", "awaiting-approval"]);
+
+/** Trailing path segment of a cwd as a short project label; "" → "unknown". */
+function projectLabel(cwd: string): string {
+  const segments = cwd.split("/").filter(Boolean);
+  return segments.length ? segments[segments.length - 1] : "unknown";
+}
+
+interface ProjectGroup {
+  key: string;
+  sessions: Session[];
+  active: boolean;
+  lastActivity: number;
+}
+
+/**
+ * Group a machine's sessions by cwd so a long list reads as a few projects.
+ * Groups sort active-first, then most-recently-active; sessions keep input order.
+ */
+function groupByCwd(sessions: Session[]): ProjectGroup[] {
+  const byKey = new Map<string, ProjectGroup>();
+  for (const s of sessions) {
+    const key = s.cwd || "";
+    let g = byKey.get(key);
+    if (!g) {
+      g = { key, sessions: [], active: false, lastActivity: 0 };
+      byKey.set(key, g);
+    }
+    g.sessions.push(s);
+    if (ACTIVE.has(s.status)) g.active = true;
+    const ts = s.lastActivity ? Date.parse(s.lastActivity) : NaN;
+    if (!Number.isNaN(ts)) g.lastActivity = Math.max(g.lastActivity, ts);
+  }
+  return [...byKey.values()].sort(
+    (a, b) => Number(b.active) - Number(a.active) || b.lastActivity - a.lastActivity || a.key.localeCompare(b.key),
+  );
+}
+
+function renderGroup(g: ProjectGroup): string {
+  const key = escapeHtml(g.key);
+  const label = escapeHtml(projectLabel(g.key));
+  const rows = g.sessions.map(renderSession).join("\n");
+  // A group holding a live session opens by default; all-done groups collapse
+  // to keep a long list scannable. The client preserves manual toggles.
+  return `<details class="project-group" data-group-key="${key}"${g.active ? " open" : ""}>
+    <summary class="project-head">
+      <span class="project-name">${label}</span>
+      <span class="project-count">${g.sessions.length}</span>
+    </summary>
+    <ul class="session-list">
+${rows}
+    </ul>
+  </details>`;
+}
+
 function renderMachine(m: MachineView): string {
   const name = escapeHtml(m.machineId);
   const count = m.sessions.length;
-  const rows = m.sessions.map(renderSession).join("\n");
   const body = count
-    ? `<ul class="session-list">\n${rows}\n</ul>`
+    ? groupByCwd(m.sessions).map(renderGroup).join("\n")
     : `<p class="empty">no sessions</p>`;
   return `<section class="machine" data-machine-id="${name}">
     <header class="machine-head">
@@ -127,16 +181,32 @@ body {
 }
 .machine-name { color: var(--accent); font-weight: 600; }
 .machine-count { color: var(--ink-2); font-size: 11px; }
-.session-list { list-style: none; margin: 0; padding: 0; }
+.session-list { list-style: none; margin: 0; padding: 0 0 0 8px; }
+.project-group { margin: 2px 0; }
+.project-group > summary {
+  display: flex; align-items: baseline; gap: 8px; cursor: pointer;
+  padding: 4px 6px; border-radius: 4px; list-style: none; user-select: none;
+}
+.project-group > summary::-webkit-details-marker { display: none; }
+.project-group > summary::before { content: "▸"; color: var(--ink-2); font-size: 10px; }
+.project-group[open] > summary::before { content: "▾"; }
+.project-group > summary:hover { background: var(--paper-2); }
+.project-name { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-count {
+  color: var(--ink-2); font-size: 11px; border: 1px solid var(--rule);
+  border-radius: 999px; padding: 0 7px; margin-left: auto;
+}
 .session {
-  display: grid; grid-template-columns: 14px minmax(0,1fr) auto; align-items: center;
-  column-gap: 10px; padding: 5px 6px; border-radius: 4px; cursor: pointer;
+  display: grid; grid-template-columns: 14px minmax(0,1fr) auto;
+  align-items: center; column-gap: 10px; row-gap: 1px;
+  padding: 5px 6px; border-radius: 4px; cursor: pointer;
 }
 .session:hover { background: var(--paper-2); }
 .session.selected { background: var(--paper-2); outline: 1px solid var(--rule); }
-.session-id { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-meta { grid-column: 2; color: var(--ink-2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-status { color: var(--ink-2); font-size: 11px; }
+.dot { grid-column: 1; grid-row: 1; }
+.session-id { grid-column: 2; grid-row: 1; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-status { grid-column: 3; grid-row: 1; color: var(--ink-2); font-size: 11px; }
+.session-meta { grid-column: 2 / -1; grid-row: 2; color: var(--ink-2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ink-2); display: inline-block; }
 .status-starting { background: var(--ink-2); }
 .status-running { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
@@ -179,12 +249,15 @@ body {
 .diff-add { color: var(--accent); }
 .diff-del { color: var(--danger); }
 .diff-context { color: var(--ink-2); }
-.session-activity { grid-column: 2; color: var(--ink-2); font-size: 11px; opacity: 0.85; }
+.session-activity { grid-column: 2 / -1; grid-row: 3; color: var(--ink-2); font-size: 11px; opacity: 0.85; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .detail-activity { display: block; margin-top: 4px; color: var(--ink-2); font-size: 12px; }
 .detail-events { display: flex; flex-direction: column; gap: 4px; margin-top: 10px; }
 .event { padding: 4px 8px; border-left: 2px solid var(--rule); white-space: pre-wrap; word-break: break-word; font-size: 12px; }
 .event-text { color: var(--ink); }
 .event-tool { color: var(--accent); border-left-color: var(--accent); }`;
+
+/** Exposed for CSS-regression tests (Bug A: activity line must not collide). */
+export const THEME_CSS_FOR_TEST = THEME_CSS;
 
 /** The server-rendered HTML shell: #app mount + module client + inlined theme. */
 export function renderShell(): string {
