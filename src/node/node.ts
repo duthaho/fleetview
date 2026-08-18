@@ -33,6 +33,11 @@ export class FleetNode {
       this.send({ t: "promptRaised", promptId: p.promptId, sessionId: p.sessionId, tool: p.tool, detail: p.detail }),
     );
     source.onArtifact((a) => this.send({ t: "artifact", sessionId: a.sessionId, diff: a.diff }));
+    // External resolution (e.g. a Telegram tap on the agentkit bridge): clear the
+    // prompt from the server inbox so it doesn't linger, clickable, after the fact.
+    source.onPromptResolved?.((promptId, approve) =>
+      this.send({ t: "promptResolved", promptId, approve }),
+    );
 
     conn.on("message", (data) => {
       const msg = parseMessage(String(data));
